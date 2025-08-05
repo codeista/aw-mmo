@@ -1,0 +1,33 @@
+{
+  "name": "spacetimedb-game-toolkit",
+  "version": "1.0.0",
+  "description": "A toolkit for planning and creating proof of concept games with SpacetimeDB",
+  "main": "game-planning-agent.js",
+  "scripts": {
+    "start": "node game-planning-agent.js",
+    "agent": "node game-planning-agent.js",
+    "advanced-agent": "tsx spacetimedb-game-agent.ts"
+  },
+  "keywords": [
+    "spacetimedb",
+    "game-development",
+    "multiplayer",
+    "typescript",
+    "rust"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "optionalDependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.0.0",
+    "inquirer": "^9.2.0"
+  }
+}
