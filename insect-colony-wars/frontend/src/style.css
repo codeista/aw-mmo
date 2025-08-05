@@ -168,6 +168,8 @@ body {
   width: 250px;
   max-height: 60vh;
   overflow-y: auto;
+  pointer-events: all;
+  z-index: 100;
 }
 
 #unitPanel h3 {

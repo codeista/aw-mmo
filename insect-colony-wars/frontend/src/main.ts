@@ -421,6 +421,29 @@ class InsectColonyWarsGame {
   }
 
   private setupUI() {
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        // Clear selection
+        this.selectedAntIds = [];
+        this.viewport.clearSelection();
+        this.updateUI();
+      } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+        // Select all units
+        e.preventDefault();
+        if (this.currentColony) {
+          this.selectedAntIds = [];
+          this.ants.forEach(ant => {
+            if (ant.colony_id === this.currentColony!.id) {
+              this.selectedAntIds.push(ant.id);
+            }
+          });
+          this.viewport.selectAnts(this.selectedAntIds);
+          this.updateUI();
+        }
+      }
+    });
+    
     const app = document.getElementById('app')!;
     app.innerHTML = `
       <div id="gameContainer">
@@ -465,6 +488,10 @@ class InsectColonyWarsGame {
         <div id="unitPanel" class="ui-panel">
           <h3>Units</h3>
           <div id="unitList"></div>
+          <div style="margin-top: 10px; font-size: 11px; color: #666;">
+            ESC: Clear • Ctrl+A: Select All<br>
+            Click: Select • Shift+Click: Add
+          </div>
         </div>
       </div>
     `;
@@ -717,16 +744,22 @@ class InsectColonyWarsGame {
     // Add event listeners
     unitList.querySelectorAll('.unit-group-header').forEach(header => {
       header.addEventListener('click', (e) => {
+        e.stopPropagation();
         const group = (e.currentTarget as HTMLElement).parentElement!;
+        const wasExpanded = group.classList.contains('expanded');
+        
+        // Toggle expansion
         group.classList.toggle('expanded');
         
-        // Select all units of this type
-        const type = group.dataset.type as AntType;
-        const ants = antsByType.get(type) || [];
-        if (ants.length > 0) {
-          this.selectedAntIds = ants.map(a => a.id);
-          this.viewport.selectAnts(this.selectedAntIds);
-          this.updateUI();
+        // Only select all if we're expanding
+        if (!wasExpanded) {
+          const type = group.dataset.type as AntType;
+          const ants = antsByType.get(type) || [];
+          if (ants.length > 0) {
+            this.selectedAntIds = ants.map(a => a.id);
+            this.viewport.selectAnts(this.selectedAntIds);
+            this.updateUI();
+          }
         }
       });
     });
