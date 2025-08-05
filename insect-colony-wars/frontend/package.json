@@ -1,0 +1,17 @@
+{
+  "name": "insect-colony-wars-frontend",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "@clockworklabs/spacetimedb-sdk": "^0.10.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}
