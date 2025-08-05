@@ -238,6 +238,123 @@ pub fn create_player(ctx: ReducerContext, username: String) {
     log::info!("Player created: {:?}", ctx.sender);
 }
 
+/// Respawn as a new queen with minimal resources
+#[spacetimedb(reducer)]
+pub fn respawn_as_queen(ctx: ReducerContext, x: f32, y: f32) {
+    let player = match Player::filter_by_id(&ctx.sender) {
+        Some(p) => p,
+        None => {
+            log::error!("Player not found: {:?}", ctx.sender);
+            return;
+        }
+    };
+    
+    // Delete old colonies and ants
+    for colony in Colony::iter().filter(|c| c.player_id == ctx.sender) {
+        // Delete all ants from this colony
+        for ant in Ant::iter().filter(|a| a.colony_id == colony.id) {
+            Ant::delete_by_id(&ant.id);
+        }
+        // Delete all chambers
+        for chamber in Chamber::iter().filter(|ch| ch.colony_id == colony.id) {
+            Chamber::delete_by_id(&chamber.id);
+        }
+        // Delete colony
+        Colony::delete_by_id(&colony.id);
+    }
+    
+    // Create minimal colony
+    let colony = Colony {
+        id: 0, // autoinc
+        player_id: ctx.sender,
+        queen_id: None,
+        food: 0.0, // Start with nothing
+        minerals: 0.0,
+        larvae: 0, // No larvae
+        queen_jelly: 20.0, // Just enough to spawn 1 worker
+        population: 1,
+        territory_radius: 30.0, // Smaller territory
+        created_at: spacetimedb::timestamp(),
+        ai_enabled: false, // Manual control for survival
+    };
+    let colony_id = Colony::insert(colony).unwrap().id;
+    
+    // Create queen ant
+    let (health, speed, damage) = get_ant_stats(AntType::Queen);
+    let queen = Ant {
+        id: 0, // autoinc
+        colony_id,
+        ant_type: AntType::Queen,
+        x,
+        y,
+        z: -5.0, // Closer to surface
+        health,
+        max_health: health,
+        carrying_resource: None,
+        carrying_amount: 0.0,
+        task: TaskType::Idle,
+        target_x: None,
+        target_y: None,
+        target_z: None,
+        speed,
+        attack_damage: damage,
+    };
+    let queen_id = Ant::insert(queen).unwrap().id;
+    
+    // Update colony with queen reference
+    let mut colony_update = Colony::filter_by_id(&colony_id).unwrap();
+    colony_update.queen_id = Some(queen_id);
+    Colony::update_by_id(&colony_id, colony_update);
+    
+    // Create minimal throne room
+    let throne = Chamber {
+        id: 0, // autoinc
+        colony_id,
+        chamber_type: ChamberType::ThroneRoom,
+        x,
+        y,
+        z: -5.0,
+        level: 1,
+        capacity: 1,
+    };
+    Chamber::insert(throne);
+    
+    // Create one worker to start
+    let (worker_health, worker_speed, worker_damage) = get_ant_stats(AntType::Worker);
+    let worker = Ant {
+        id: 0, // autoinc
+        colony_id,
+        ant_type: AntType::Worker,
+        x: x + 5.0,
+        y: y + 5.0,
+        z: -5.0,
+        health: worker_health,
+        max_health: worker_health,
+        carrying_resource: None,
+        carrying_amount: 0.0,
+        task: TaskType::Idle,
+        target_x: None,
+        target_y: None,
+        target_z: None,
+        speed: worker_speed,
+        attack_damage: worker_damage,
+    };
+    Ant::insert(worker);
+    
+    // Update colony population
+    let mut final_colony = Colony::filter_by_id(&colony_id).unwrap();
+    final_colony.population = 2; // Queen + 1 worker
+    final_colony.queen_jelly = 18.0; // Deduct worker cost
+    Colony::update_by_id(&colony_id, final_colony);
+    
+    // Update player stats
+    let mut player_update = player;
+    player_update.total_colonies += 1;
+    Player::update_by_id(&ctx.sender, player_update);
+    
+    log::info!("Player {:?} respawned as queen at ({}, {})", ctx.sender, x, y);
+}
+
 /// Start a new colony with a queen
 #[spacetimedb(reducer)]
 pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
@@ -249,7 +366,7 @@ pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
         }
     };
     
-    // Create colony
+    // Create colony with standard resources
     let colony = Colony {
         id: 0, // autoinc
         player_id: ctx.sender,

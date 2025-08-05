@@ -96,12 +96,12 @@ interface ResourceNode {
 
 // 3D Viewport for underground visualization
 class UndergroundViewport {
-  private canvas: HTMLCanvasElement;
+  public canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private cameraX: number = 0;
-  private cameraY: number = 0;
+  public cameraX: number = 0;
+  public cameraY: number = 0;
   public cameraZ: number = -10;
-  private zoom: number = 1;
+  public zoom: number = 1;
   private selectedAnts: Set<number> = new Set();
   private isDragging: boolean = false;
   private lastMouseX: number = 0;
@@ -374,6 +374,7 @@ class InsectColonyWarsGame {
   private selectedAntIds: number[] = [];
   private service: any; // Will be SpacetimeService or MockService
   private huntMode: boolean = false;
+  private placementMode: boolean = false;
 
   constructor() {
     this.setupUI();
@@ -456,6 +457,7 @@ class InsectColonyWarsGame {
           <div id="playerInfo">
             <span id="playerName">Not connected</span>
             <span id="colonyStats">No colony</span>
+            <button id="respawnBtn" class="action-btn" style="margin-left: 10px;">🔄 Respawn</button>
           </div>
           <div id="resources">
             <span class="resource">🍎 Food: <span id="food">0</span></span>
@@ -505,6 +507,15 @@ class InsectColonyWarsGame {
           <div style="margin-top: 10px; font-size: 11px; color: #666;">
             ESC: Clear • Ctrl+A: Select All<br>
             Click: Select • Shift+Click: Add
+          </div>
+        </div>
+        
+        <div id="placementMode" class="placement-overlay" style="display: none;">
+          <div class="placement-info">
+            <h2>👑 Choose Queen Location</h2>
+            <p>Click anywhere on the map to place your new queen</p>
+            <p style="color: #FFD700;">You start with 20 queen jelly and 1 worker</p>
+            <button id="cancelPlacement" class="action-btn">Cancel</button>
           </div>
         </div>
       </div>
@@ -564,6 +575,28 @@ class InsectColonyWarsGame {
         btn.classList.toggle('active');
         this.huntMode = btn.classList.contains('active');
         btn.textContent = this.huntMode ? '⚔️ Cancel Hunt' : '⚔️ Hunt Mode';
+      }
+    });
+    
+    document.getElementById('respawnBtn')?.addEventListener('click', () => {
+      if (confirm('Respawn as a new queen? This will delete your current colony!')) {
+        this.enterPlacementMode();
+      }
+    });
+    
+    document.getElementById('cancelPlacement')?.addEventListener('click', () => {
+      this.exitPlacementMode();
+    });
+    
+    document.getElementById('placementMode')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        // Clicked on overlay, not the info box
+        const rect = this.viewport.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - this.viewport.canvas.width / 2) / this.viewport.zoom + this.viewport.cameraX;
+        const y = (e.clientY - rect.top - this.viewport.canvas.height / 2) / this.viewport.zoom + this.viewport.cameraY;
+        
+        this.service.call('respawn_as_queen', { x, y });
+        this.exitPlacementMode();
       }
     });
   }
@@ -858,6 +891,20 @@ class InsectColonyWarsGame {
         this.updateUI();
       });
     });
+  }
+  
+  private enterPlacementMode() {
+    this.placementMode = true;
+    document.getElementById('placementMode')!.style.display = 'flex';
+    // Clear any selections
+    this.selectedAntIds = [];
+    this.viewport.clearSelection();
+    this.huntMode = false;
+  }
+  
+  private exitPlacementMode() {
+    this.placementMode = false;
+    document.getElementById('placementMode')!.style.display = 'none';
   }
 }
 

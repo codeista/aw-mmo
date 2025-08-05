@@ -159,6 +159,9 @@ export class MockSpacetimeService {
       case 'hive_command_hunt':
         this.hiveCommandHunt(args.colony_id, args.target_x, args.target_y, args.target_z);
         break;
+      case 'respawn_as_queen':
+        this.respawnAsQueen(args.x, args.y);
+        break;
     }
     
     this.saveState();
@@ -569,6 +572,121 @@ export class MockSpacetimeService {
     });
     
     this.emit('Ant', this.data.Ant);
+  }
+  
+  private respawnAsQueen(x: number, y: number) {
+    const player = this.data.Player.find(p => p.id === this.identity);
+    if (!player) {
+      // Create player if doesn't exist
+      const newPlayer = {
+        id: this.identity,
+        username: 'Queen',
+        created_at: Date.now(),
+        total_colonies: 0,
+        resources_gathered: 0
+      };
+      this.data.Player.push(newPlayer);
+    }
+    
+    // Delete old colonies
+    this.data.Colony = this.data.Colony.filter(c => c.player_id !== this.identity);
+    this.data.Ant = this.data.Ant.filter(a => {
+      const colony = this.data.Colony.find(c => c.id === a.colony_id);
+      return colony && colony.player_id !== this.identity;
+    });
+    this.data.Chamber = this.data.Chamber.filter(ch => {
+      const colony = this.data.Colony.find(c => c.id === ch.colony_id);
+      return colony && colony.player_id !== this.identity;
+    });
+    
+    // Create new minimal colony
+    const colonyId = this.nextId.colony++;
+    const colony = {
+      id: colonyId,
+      player_id: this.identity,
+      queen_id: null,
+      food: 0,
+      minerals: 0,
+      larvae: 0,
+      queen_jelly: 20, // Just enough for workers
+      population: 2,
+      territory_radius: 30,
+      created_at: Date.now(),
+      ai_enabled: false
+    };
+    
+    this.data.Colony.push(colony);
+    
+    // Create queen
+    const queenId = this.nextId.ant++;
+    const queen = {
+      id: queenId,
+      colony_id: colonyId,
+      ant_type: AntType.Queen,
+      x,
+      y,
+      z: -5,
+      health: 200,
+      max_health: 200,
+      carrying_resource: null,
+      carrying_amount: 0,
+      task: TaskType.Idle,
+      target_x: null,
+      target_y: null,
+      target_z: null,
+      speed: 1,
+      attack_damage: 0
+    };
+    
+    this.data.Ant.push(queen);
+    colony.queen_id = queenId;
+    
+    // Create minimal throne room
+    const throneId = this.nextId.chamber++;
+    const throne = {
+      id: throneId,
+      colony_id: colonyId,
+      chamber_type: ChamberType.ThroneRoom,
+      x,
+      y,
+      z: -5,
+      level: 1,
+      capacity: 1
+    };
+    
+    this.data.Chamber.push(throne);
+    
+    // Create one worker
+    const workerId = this.nextId.ant++;
+    const worker = {
+      id: workerId,
+      colony_id: colonyId,
+      ant_type: AntType.Worker,
+      x: x + 5,
+      y: y + 5,
+      z: -5,
+      health: 50,
+      max_health: 50,
+      carrying_resource: null,
+      carrying_amount: 0,
+      task: TaskType.Idle,
+      target_x: null,
+      target_y: null,
+      target_z: null,
+      speed: 4,
+      attack_damage: 5
+    };
+    
+    this.data.Ant.push(worker);
+    
+    // Deduct worker cost
+    colony.queen_jelly = 18;
+    
+    // Emit all updates
+    this.emit('Player', this.data.Player);
+    this.emit('Colony', this.data.Colony);
+    this.emit('Ant', this.data.Ant);
+    this.emit('Chamber', this.data.Chamber);
   }
   
   private updateGame() {

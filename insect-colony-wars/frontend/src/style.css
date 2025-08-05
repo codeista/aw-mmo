@@ -360,3 +360,44 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* Placement Mode */
+.placement-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: crosshair;
+}
+
+.placement-info {
+  background: rgba(0, 0, 0, 0.9);
+  border: 2px solid #FFD700;
+  border-radius: 10px;
+  padding: 30px;
+  text-align: center;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.placement-info h2 {
+  color: #FFD700;
+  margin: 0 0 15px 0;
+}
+
+.placement-info p {
+  margin: 10px 0;
+  color: #e0e0e0;
+}
+
+#respawnBtn {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: linear-gradient(135deg, #FF6347, #DC143C);
+}
