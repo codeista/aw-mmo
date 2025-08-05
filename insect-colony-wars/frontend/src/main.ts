@@ -46,9 +46,11 @@ interface Colony {
   food: number;
   minerals: number;
   larvae: number;
+  queen_jelly: number;
   population: number;
   territory_radius: number;
   created_at: number;
+  ai_enabled: boolean;
 }
 
 interface Ant {
@@ -458,6 +460,7 @@ class InsectColonyWarsGame {
             <span class="resource">🍎 Food: <span id="food">0</span></span>
             <span class="resource">💎 Minerals: <span id="minerals">0</span></span>
             <span class="resource">🥚 Larvae: <span id="larvae">0</span></span>
+            <span class="resource">👑 Jelly: <span id="queenJelly">0</span></span>
             <span class="resource">🐜 Population: <span id="population">0</span></span>
           </div>
         </div>
@@ -466,13 +469,14 @@ class InsectColonyWarsGame {
           <div id="actions">
             <button id="createColonyBtn" class="action-btn">Create Colony</button>
             <div id="colonyActions" style="display: none;">
-              <button class="spawn-btn" data-ant="Worker">Spawn Worker (10🍎)</button>
-              <button class="spawn-btn" data-ant="Soldier">Spawn Soldier (20🍎)</button>
-              <button class="spawn-btn" data-ant="Scout">Spawn Scout (15🍎)</button>
-              <button class="spawn-btn" data-ant="Major">Spawn Major (50🍎 10💎)</button>
+              <button class="spawn-btn" data-ant="Worker">Spawn Worker (10🍎 2👑)</button>
+              <button class="spawn-btn" data-ant="Soldier">Spawn Soldier (20🍎 3👑)</button>
+              <button class="spawn-btn" data-ant="Scout">Spawn Scout (15🍎 2.5👑)</button>
+              <button class="spawn-btn" data-ant="Major">Spawn Major (50🍎 10💎 5👑)</button>
               <button class="chamber-btn" data-chamber="Nursery">Build Nursery (50🍎 10💎)</button>
               <button class="chamber-btn" data-chamber="Storage">Build Storage (30🍎 20💎)</button>
               <button class="chamber-btn" data-chamber="Barracks">Build Barracks (100🍎 50💎)</button>
+              <button id="toggleAI" class="action-btn">🤖 AI: <span id="aiStatus">ON</span></button>
             </div>
           </div>
           <div id="selection">
@@ -524,6 +528,12 @@ class InsectColonyWarsGame {
         }
       }
     });
+    
+    document.getElementById('toggleAI')?.addEventListener('click', () => {
+      if (this.currentColony) {
+        this.service.call('toggle_colony_ai', { colony_id: this.currentColony.id });
+      }
+    });
   }
 
   private updateUI() {
@@ -536,7 +546,14 @@ class InsectColonyWarsGame {
       document.getElementById('food')!.textContent = Math.floor(this.currentColony.food).toString();
       document.getElementById('minerals')!.textContent = Math.floor(this.currentColony.minerals).toString();
       document.getElementById('larvae')!.textContent = this.currentColony.larvae.toString();
+      document.getElementById('queenJelly')!.textContent = Math.floor(this.currentColony.queen_jelly || 0).toString();
       document.getElementById('population')!.textContent = this.currentColony.population.toString();
+      
+      // Update AI status
+      const aiStatus = document.getElementById('aiStatus');
+      if (aiStatus) {
+        aiStatus.textContent = this.currentColony.ai_enabled ? 'ON' : 'OFF';
+      }
       
       document.getElementById('createColonyBtn')!.style.display = 'none';
       document.getElementById('colonyActions')!.style.display = 'flex';

@@ -60,9 +60,11 @@ pub struct Colony {
     pub food: f32,
     pub minerals: f32,
     pub larvae: u32,
+    pub queen_jelly: f32, // Queen's life force
     pub population: u32,
     pub territory_radius: f32,
     pub created_at: u64,
+    pub ai_enabled: bool, // Auto-management toggle
 }
 
 /// Individual ant unit
@@ -164,6 +166,22 @@ pub struct Battle {
     pub timestamp: u64,
 }
 
+/// Explored territory data
+#[spacetimedb(table)]
+pub struct ExploredTerritory {
+    #[primary_key]
+    #[autoinc]
+    pub id: u32,
+    pub colony_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub discovered_at: u64,
+    pub has_resources: bool,
+    pub has_threats: bool,
+    pub threat_level: u32,
+}
+
 // ===== HELPER FUNCTIONS =====
 
 fn get_ant_stats(ant_type: AntType) -> (u32, f32, u32) {
@@ -182,12 +200,20 @@ fn distance_3d(x1: f32, y1: f32, z1: f32, x2: f32, y2: f32, z2: f32) -> f32 {
 }
 
 fn can_afford_ant(colony: &Colony, ant_type: AntType) -> bool {
-    match ant_type {
+    let jelly_cost = match ant_type {
+        AntType::Worker => 2.0,
+        AntType::Soldier => 3.0,
+        AntType::Scout => 2.5,
+        AntType::Major => 5.0,
+        AntType::Queen => 999.0, // Can't spawn queens
+    };
+    
+    colony.queen_jelly >= jelly_cost && match ant_type {
         AntType::Worker => colony.food >= 10.0 && colony.larvae >= 1,
         AntType::Soldier => colony.food >= 20.0 && colony.larvae >= 1,
         AntType::Scout => colony.food >= 15.0 && colony.larvae >= 1,
         AntType::Major => colony.food >= 50.0 && colony.minerals >= 10.0 && colony.larvae >= 2,
-        AntType::Queen => false, // Can't spawn queens
+        AntType::Queen => false,
     }
 }
 
@@ -231,9 +257,11 @@ pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
         food: 100.0,
         minerals: 0.0,
         larvae: 5,
+        queen_jelly: 100.0, // Starting queen jelly
         population: 1,
         territory_radius: 50.0,
         created_at: spacetimedb::timestamp(),
+        ai_enabled: true, // AI enabled by default
     };
     let colony_id = Colony::insert(colony).unwrap().id;
     
@@ -333,6 +361,16 @@ pub fn spawn_ant(ctx: ReducerContext, colony_id: u32, ant_type: AntType, x: f32,
     }
     
     // Deduct resources
+    let jelly_cost = match ant_type {
+        AntType::Worker => 2.0,
+        AntType::Soldier => 3.0,
+        AntType::Scout => 2.5,
+        AntType::Major => 5.0,
+        AntType::Queen => return, // Can't spawn queens
+    };
+    
+    colony.queen_jelly -= jelly_cost;
+    
     match ant_type {
         AntType::Worker => {
             colony.food -= 10.0;
@@ -351,7 +389,7 @@ pub fn spawn_ant(ctx: ReducerContext, colony_id: u32, ant_type: AntType, x: f32,
             colony.minerals -= 10.0;
             colony.larvae -= 2;
         }
-        AntType::Queen => return, // Can't spawn queens
+        AntType::Queen => return,
     }
     
     // Create ant
@@ -650,6 +688,150 @@ pub fn lay_pheromone(ctx: ReducerContext, colony_id: u32, x: f32, y: f32, z: f32
         created_at: spacetimedb::timestamp(),
     };
     Pheromone::insert(pheromone);
+}
+
+/// Toggle AI for a colony
+#[spacetimedb(reducer)]
+pub fn toggle_colony_ai(ctx: ReducerContext, colony_id: u32) {
+    let mut colony = match Colony::filter_by_id(&colony_id) {
+        Some(c) => c,
+        None => {
+            log::error!("Colony not found: {}", colony_id);
+            return;
+        }
+    };
+    
+    if colony.player_id != ctx.sender {
+        log::error!("Colony not owned by player");
+        return;
+    }
+    
+    colony.ai_enabled = !colony.ai_enabled;
+    Colony::update_by_id(&colony_id, colony);
+    
+    log::info!("Colony {} AI toggled to: {}", colony_id, colony.ai_enabled);
+}
+
+/// AI decision making - called periodically by the system
+#[spacetimedb(reducer)]
+pub fn colony_ai_tick(_ctx: ReducerContext) {
+    // Process each colony with AI enabled
+    for colony in Colony::iter().filter(|c| c.ai_enabled) {
+        // Check queen health
+        if let Some(queen_id) = colony.queen_id {
+            if let Some(queen) = Ant::filter_by_id(&queen_id) {
+                // Queen jelly depletes over time
+                let mut colony_update = colony.clone();
+                colony_update.queen_jelly = (colony_update.queen_jelly - 0.1).max(0.0);
+                
+                // If queen jelly is low, prioritize food gathering
+                if colony_update.queen_jelly < 20.0 {
+                    // Find idle workers and send them to gather food
+                    let idle_workers: Vec<Ant> = Ant::iter()
+                        .filter(|a| a.colony_id == colony.id && 
+                                   a.ant_type == AntType::Worker && 
+                                   a.task == TaskType::Idle)
+                        .collect();
+                    
+                    // Find nearest food source
+                    if let Some(food_node) = ResourceNode::iter()
+                        .filter(|r| r.resource_type == ResourceType::Food && r.amount > 0.0)
+                        .min_by_key(|r| distance_3d(r.x, r.y, r.z, queen.x, queen.y, queen.z) as i32) {
+                        
+                        // Send workers to gather
+                        for worker in idle_workers.iter().take(3) {
+                            let mut worker_update = worker.clone();
+                            worker_update.target_x = Some(food_node.x);
+                            worker_update.target_y = Some(food_node.y);
+                            worker_update.target_z = Some(food_node.z);
+                            worker_update.task = TaskType::Gathering;
+                            Ant::update_by_id(&worker.id, worker_update);
+                        }
+                    }
+                }
+                
+                // Scout for new territory
+                let scout_count = Ant::iter()
+                    .filter(|a| a.colony_id == colony.id && a.ant_type == AntType::Scout)
+                    .count();
+                
+                if scout_count < 2 && colony_update.food >= 15.0 && colony_update.larvae >= 1 && colony_update.queen_jelly >= 2.5 {
+                    // Spawn a scout
+                    spawn_scout_at_colony(&colony);
+                }
+                
+                // Replace dead workers
+                let worker_count = Ant::iter()
+                    .filter(|a| a.colony_id == colony.id && a.ant_type == AntType::Worker)
+                    .count();
+                
+                if worker_count < 5 && colony_update.food >= 10.0 && colony_update.larvae >= 1 && colony_update.queen_jelly >= 2.0 {
+                    // Spawn a worker
+                    spawn_worker_at_colony(&colony);
+                }
+                
+                // Convert queen jelly from food if needed
+                if colony_update.queen_jelly < 50.0 && colony_update.food >= 20.0 {
+                    colony_update.food -= 10.0;
+                    colony_update.queen_jelly += 5.0;
+                }
+                
+                Colony::update_by_id(&colony.id, colony_update);
+            }
+        }
+    }
+}
+
+// Helper function to spawn scout
+fn spawn_scout_at_colony(colony: &Colony) {
+    if let Some(queen) = colony.queen_id.and_then(|id| Ant::filter_by_id(&id)) {
+        let (health, speed, damage) = get_ant_stats(AntType::Scout);
+        let scout = Ant {
+            id: 0,
+            colony_id: colony.id,
+            ant_type: AntType::Scout,
+            x: queen.x + 5.0,
+            y: queen.y + 5.0,
+            z: queen.z,
+            health,
+            max_health: health,
+            carrying_resource: None,
+            carrying_amount: 0.0,
+            task: TaskType::Exploring,
+            target_x: Some(queen.x + 100.0 * ((spacetimedb::timestamp() % 1000) as f32 / 1000.0 - 0.5)),
+            target_y: Some(queen.y + 100.0 * ((spacetimedb::timestamp() % 1337) as f32 / 1337.0 - 0.5)),
+            target_z: Some(queen.z),
+            speed,
+            attack_damage: damage,
+        };
+        Ant::insert(scout);
+    }
+}
+
+// Helper function to spawn worker
+fn spawn_worker_at_colony(colony: &Colony) {
+    if let Some(queen) = colony.queen_id.and_then(|id| Ant::filter_by_id(&id)) {
+        let (health, speed, damage) = get_ant_stats(AntType::Worker);
+        let worker = Ant {
+            id: 0,
+            colony_id: colony.id,
+            ant_type: AntType::Worker,
+            x: queen.x + 3.0,
+            y: queen.y + 3.0,
+            z: queen.z,
+            health,
+            max_health: health,
+            carrying_resource: None,
+            carrying_amount: 0.0,
+            task: TaskType::Idle,
+            target_x: None,
+            target_y: None,
+            target_z: None,
+            speed,
+            attack_damage: damage,
+        };
+        Ant::insert(worker);
+    }
 }
 
 #[spacetimedb(init)]

@@ -147,6 +147,9 @@ export class MockSpacetimeService {
       case 'attack_target':
         this.attackTarget(args.attacker_id, args.target_id);
         break;
+      case 'toggle_colony_ai':
+        this.toggleColonyAI(args.colony_id);
+        break;
     }
     
     this.saveState();
@@ -180,9 +183,11 @@ export class MockSpacetimeService {
       food: 100,
       minerals: 0,
       larvae: 5,
+      queen_jelly: 100,
       population: 1,
       territory_radius: 50,
-      created_at: Date.now()
+      created_at: Date.now(),
+      ai_enabled: true
     };
     
     this.data.Colony.push(colony);
@@ -265,15 +270,16 @@ export class MockSpacetimeService {
     
     // Check resources
     const costs = {
-      [AntType.Worker]: { food: 10, minerals: 0, larvae: 1 },
-      [AntType.Soldier]: { food: 20, minerals: 0, larvae: 1 },
-      [AntType.Scout]: { food: 15, minerals: 0, larvae: 1 },
-      [AntType.Major]: { food: 50, minerals: 10, larvae: 2 },
-      [AntType.Queen]: { food: 999, minerals: 999, larvae: 999 } // Can't spawn
+      [AntType.Worker]: { food: 10, minerals: 0, larvae: 1, jelly: 2 },
+      [AntType.Soldier]: { food: 20, minerals: 0, larvae: 1, jelly: 3 },
+      [AntType.Scout]: { food: 15, minerals: 0, larvae: 1, jelly: 2.5 },
+      [AntType.Major]: { food: 50, minerals: 10, larvae: 2, jelly: 5 },
+      [AntType.Queen]: { food: 999, minerals: 999, larvae: 999, jelly: 999 } // Can't spawn
     };
     
     const cost = costs[antType];
-    if (colony.food < cost.food || colony.minerals < cost.minerals || colony.larvae < cost.larvae) {
+    if (colony.food < cost.food || colony.minerals < cost.minerals || 
+        colony.larvae < cost.larvae || colony.queen_jelly < cost.jelly) {
       console.log('Not enough resources');
       return;
     }
@@ -282,6 +288,7 @@ export class MockSpacetimeService {
     colony.food -= cost.food;
     colony.minerals -= cost.minerals;
     colony.larvae -= cost.larvae;
+    colony.queen_jelly -= cost.jelly;
     
     // Create ant
     const stats = {
@@ -462,6 +469,14 @@ export class MockSpacetimeService {
     }, 100); // 10 FPS for smooth movement
   }
 
+  private toggleColonyAI(colonyId: number) {
+    const colony = this.data.Colony.find(c => c.id === colonyId);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    colony.ai_enabled = !colony.ai_enabled;
+    this.emit('Colony', this.data.Colony);
+  }
+  
   private updateGame() {
     let antsChanged = false;
     let coloniesChanged = false;
@@ -577,8 +592,9 @@ export class MockSpacetimeService {
       }
     });
     
-    // Generate larvae
+    // Update colonies
     this.data.Colony.forEach(colony => {
+      // Generate larvae
       const nurseries = this.data.Chamber.filter(ch => 
         ch.colony_id === colony.id && 
         ch.chamber_type === ChamberType.Nursery
@@ -587,6 +603,71 @@ export class MockSpacetimeService {
       if (Math.random() < 0.01 * (1 + nurseries)) {
         colony.larvae++;
         coloniesChanged = true;
+      }
+      
+      // Deplete queen jelly over time
+      if (colony.queen_jelly > 0) {
+        colony.queen_jelly = Math.max(0, colony.queen_jelly - 0.02);
+        coloniesChanged = true;
+      }
+      
+      // AI behavior
+      if (colony.ai_enabled && Math.random() < 0.1) { // 10% chance per tick
+        // Find colony's ants
+        const colonyAnts = this.data.Ant.filter(a => a.colony_id === colony.id);
+        const workers = colonyAnts.filter(a => a.ant_type === AntType.Worker);
+        const scouts = colonyAnts.filter(a => a.ant_type === AntType.Scout);
+        const idleWorkers = workers.filter(a => a.task === TaskType.Idle);
+        
+        // Critical: Queen jelly running low
+        if (colony.queen_jelly < 20 && idleWorkers.length > 0) {
+          // Send all idle workers to nearest food
+          const foodNodes = this.data.ResourceNode.filter(r => 
+            r.resource_type === ResourceType.Food && r.amount > 0
+          );
+          
+          if (foodNodes.length > 0) {
+            const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
+            if (queen) {
+              const nearestFood = foodNodes.sort((a, b) => {
+                const distA = Math.sqrt(Math.pow(a.x - queen.x, 2) + Math.pow(a.y - queen.y, 2));
+                const distB = Math.sqrt(Math.pow(b.x - queen.x, 2) + Math.pow(b.y - queen.y, 2));
+                return distA - distB;
+              })[0];
+              
+              idleWorkers.forEach(worker => {
+                worker.target_x = nearestFood.x;
+                worker.target_y = nearestFood.y;
+                worker.target_z = nearestFood.z;
+                worker.task = TaskType.Exploring;
+              });
+              antsChanged = true;
+            }
+          }
+        }
+        
+        // Convert food to queen jelly if needed
+        if (colony.queen_jelly < 50 && colony.food >= 20) {
+          colony.food -= 10;
+          colony.queen_jelly += 5;
+          coloniesChanged = true;
+        }
+        
+        // Spawn scouts if needed
+        if (scouts.length < 2 && colony.food >= 15 && colony.larvae >= 1 && colony.queen_jelly >= 2.5) {
+          const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
+          if (queen) {
+            this.spawnAnt(colony.id, AntType.Scout, queen.x + 10, queen.y + 10, queen.z);
+          }
+        }
+        
+        // Replace dead workers
+        if (workers.length < 5 && colony.food >= 10 && colony.larvae >= 1 && colony.queen_jelly >= 2) {
+          const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
+          if (queen) {
+            this.spawnAnt(colony.id, AntType.Worker, queen.x + 5, queen.y + 5, queen.z);
+          }
+        }
       }
     });
     
