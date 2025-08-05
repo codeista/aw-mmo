@@ -406,6 +406,7 @@ class InsectColonyWarsGame {
     service.on('Ant', (ants: Ant[]) => {
       this.ants.clear();
       ants.forEach(ant => this.ants.set(ant.id, ant));
+      this.updateUnitPanel();
     });
 
     service.on('Chamber', (chambers: Chamber[]) => {
@@ -459,6 +460,11 @@ class InsectColonyWarsGame {
         <div id="chat" class="ui-panel">
           <div id="chatMessages"></div>
           <input type="text" id="chatInput" placeholder="Type to chat..." />
+        </div>
+        
+        <div id="unitPanel" class="ui-panel">
+          <h3>Units</h3>
+          <div id="unitList"></div>
         </div>
       </div>
     `;
@@ -528,6 +534,9 @@ class InsectColonyWarsGame {
     } else {
       document.getElementById('selectedInfo')!.textContent = 'No selection';
     }
+    
+    // Update unit panel
+    this.updateUnitPanel();
   }
 
   private startRenderLoop() {
@@ -631,6 +640,123 @@ class InsectColonyWarsGame {
       
       this.updateUI();
     }
+  }
+  
+  private updateUnitPanel() {
+    const unitList = document.getElementById('unitList');
+    if (!unitList || !this.currentColony) return;
+    
+    // Group ants by type
+    const antsByType = new Map<AntType, Ant[]>();
+    this.ants.forEach(ant => {
+      if (ant.colony_id === this.currentColony!.id) {
+        if (!antsByType.has(ant.ant_type)) {
+          antsByType.set(ant.ant_type, []);
+        }
+        antsByType.get(ant.ant_type)!.push(ant);
+      }
+    });
+    
+    // Generate HTML
+    let html = '';
+    const typeOrder = [AntType.Queen, AntType.Worker, AntType.Soldier, AntType.Scout, AntType.Major];
+    
+    typeOrder.forEach(type => {
+      const ants = antsByType.get(type) || [];
+      if (ants.length === 0) return;
+      
+      html += `
+        <div class="unit-group" data-type="${type}">
+          <div class="unit-group-header">
+            <span>${type}s</span>
+            <span class="unit-group-count">${ants.length}</span>
+          </div>
+          <div class="unit-items">
+      `;
+      
+      ants.forEach(ant => {
+        const isSelected = this.selectedAntIds.includes(ant.id);
+        const healthPercent = (ant.health / ant.max_health) * 100;
+        let status = '';
+        let statusClass = '';
+        
+        if (ant.task === TaskType.Gathering) {
+          status = 'Gathering';
+          statusClass = 'gathering';
+        } else if (ant.task === TaskType.Fighting) {
+          status = 'Fighting';
+          statusClass = 'fighting';
+        } else if (ant.task === TaskType.Returning) {
+          status = 'Returning';
+          statusClass = 'returning';
+        } else if (ant.task === TaskType.Exploring) {
+          status = 'Moving';
+        }
+        
+        html += `
+          <div class="unit-item ${isSelected ? 'selected' : ''}" data-id="${ant.id}">
+            <span>#${ant.id}</span>
+            <div class="unit-health">
+              <div class="health-bar">
+                <div class="health-fill" style="width: ${healthPercent}%"></div>
+              </div>
+              ${status ? `<span class="unit-status ${statusClass}">${status}</span>` : ''}
+            </div>
+          </div>
+        `;
+      });
+      
+      html += `
+          </div>
+        </div>
+      `;
+    });
+    
+    unitList.innerHTML = html;
+    
+    // Add event listeners
+    unitList.querySelectorAll('.unit-group-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        const group = (e.currentTarget as HTMLElement).parentElement!;
+        group.classList.toggle('expanded');
+        
+        // Select all units of this type
+        const type = group.dataset.type as AntType;
+        const ants = antsByType.get(type) || [];
+        if (ants.length > 0) {
+          this.selectedAntIds = ants.map(a => a.id);
+          this.viewport.selectAnts(this.selectedAntIds);
+          this.updateUI();
+        }
+      });
+    });
+    
+    unitList.querySelectorAll('.unit-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const antId = parseInt((e.currentTarget as HTMLElement).dataset.id!);
+        const ant = this.ants.get(antId);
+        if (!ant) return;
+        
+        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+          // Add/remove from selection
+          const index = this.selectedAntIds.indexOf(antId);
+          if (index >= 0) {
+            this.selectedAntIds.splice(index, 1);
+          } else {
+            this.selectedAntIds.push(antId);
+          }
+        } else {
+          // Single selection
+          this.selectedAntIds = [antId];
+          // Focus camera on ant
+          this.viewport.focusOnPosition(ant.x, ant.y, ant.z);
+        }
+        
+        this.viewport.selectAnts(this.selectedAntIds);
+        this.updateUI();
+      });
+    });
   }
 }
 

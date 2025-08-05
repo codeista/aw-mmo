@@ -161,6 +161,133 @@ body {
   flex-direction: column;
 }
 
+/* Unit Panel */
+#unitPanel {
+  top: 80px;
+  left: 10px;
+  width: 250px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+#unitPanel h3 {
+  margin: 0 0 10px 0;
+  color: #4CAF50;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+#unitList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.unit-group {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 6px;
+  transition: all 0.2s;
+}
+
+.unit-group:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.unit-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #e0e0e0;
+}
+
+.unit-group-count {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.unit-items {
+  display: none;
+  margin-top: 6px;
+  padding-left: 10px;
+}
+
+.unit-group.expanded .unit-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unit-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.1s;
+}
+
+.unit-item:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.unit-item.selected {
+  background: rgba(76, 175, 80, 0.3);
+  border: 1px solid #4CAF50;
+}
+
+.unit-health {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #999;
+}
+
+.health-bar {
+  width: 40px;
+  height: 4px;
+  background: rgba(255, 0, 0, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.health-fill {
+  height: 100%;
+  background: #4CAF50;
+  transition: width 0.3s;
+}
+
+.unit-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.unit-status.gathering {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4CAF50;
+}
+
+.unit-status.fighting {
+  background: rgba(220, 20, 60, 0.2);
+  color: #DC143C;
+}
+
+.unit-status.returning {
+  background: rgba(33, 150, 243, 0.2);
+  color: #2196F3;
+}
+
 #chatMessages {
   flex: 1;
   overflow-y: auto;
