@@ -693,7 +693,7 @@ class InsectColonyWarsGame {
       if (ants.length === 0) return;
       
       html += `
-        <div class="unit-group" data-type="${type}">
+        <div class="unit-group expanded" data-type="${type}">
           <div class="unit-group-header">
             <span>${type}s</span>
             <span class="unit-group-count">${ants.length}</span>
@@ -720,9 +720,15 @@ class InsectColonyWarsGame {
           status = 'Moving';
         }
         
+        const icon = type === AntType.Queen ? '👑' :
+                     type === AntType.Worker ? '⚒️' :
+                     type === AntType.Soldier ? '⚔️' :
+                     type === AntType.Scout ? '🔍' :
+                     type === AntType.Major ? '🛡️' : '';
+        
         html += `
           <div class="unit-item ${isSelected ? 'selected' : ''}" data-id="${ant.id}">
-            <span>#${ant.id}</span>
+            <span>${icon} #${ant.id}</span>
             <div class="unit-health">
               <div class="health-bar">
                 <div class="health-fill" style="width: ${healthPercent}%"></div>

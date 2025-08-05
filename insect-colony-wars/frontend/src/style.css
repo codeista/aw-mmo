@@ -235,6 +235,7 @@ body {
   cursor: pointer;
   font-size: 13px;
   transition: all 0.1s;
+  border: 1px solid transparent;
 }
 
 .unit-item:hover {
