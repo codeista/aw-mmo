@@ -373,6 +373,7 @@ class InsectColonyWarsGame {
   private resources: Map<number, ResourceNode> = new Map();
   private selectedAntIds: number[] = [];
   private service: any; // Will be SpacetimeService or MockService
+  private huntMode: boolean = false;
 
   constructor() {
     this.setupUI();
@@ -469,14 +470,23 @@ class InsectColonyWarsGame {
           <div id="actions">
             <button id="createColonyBtn" class="action-btn">Create Colony</button>
             <div id="colonyActions" style="display: none;">
-              <button class="spawn-btn" data-ant="Worker">Spawn Worker (10🍎 2👑)</button>
-              <button class="spawn-btn" data-ant="Soldier">Spawn Soldier (20🍎 3👑)</button>
-              <button class="spawn-btn" data-ant="Scout">Spawn Scout (15🍎 2.5👑)</button>
-              <button class="spawn-btn" data-ant="Major">Spawn Major (50🍎 10💎 5👑)</button>
-              <button class="chamber-btn" data-chamber="Nursery">Build Nursery (50🍎 10💎)</button>
-              <button class="chamber-btn" data-chamber="Storage">Build Storage (30🍎 20💎)</button>
-              <button class="chamber-btn" data-chamber="Barracks">Build Barracks (100🍎 50💎)</button>
-              <button id="toggleAI" class="action-btn">🤖 AI: <span id="aiStatus">ON</span></button>
+              <div id="spawnButtons">
+                <button class="spawn-btn" data-ant="Worker">Spawn Worker (10🍎 2👑)</button>
+                <button class="spawn-btn" data-ant="Soldier">Spawn Soldier (20🍎 3👑)</button>
+                <button class="spawn-btn" data-ant="Scout">Spawn Scout (15🍎 2.5👑)</button>
+                <button class="spawn-btn" data-ant="Major">Spawn Major (50🍎 10💎 5👑)</button>
+              </div>
+              <div id="buildButtons">
+                <button class="chamber-btn" data-chamber="Nursery">Build Nursery (50🍎 10💎)</button>
+                <button class="chamber-btn" data-chamber="Storage">Build Storage (30🍎 20💎)</button>
+                <button class="chamber-btn" data-chamber="Barracks">Build Barracks (100🍎 50💎)</button>
+              </div>
+              <div id="commandButtons">
+                <button id="gatherBtn" class="command-btn">⚒️ Gather All</button>
+                <button id="defendBtn" class="command-btn">🛡️ Defend Queen</button>
+                <button id="huntBtn" class="command-btn">⚔️ Hunt Mode</button>
+                <button id="toggleAI" class="action-btn">🤖 AI: <span id="aiStatus">ON</span></button>
+              </div>
             </div>
           </div>
           <div id="selection">
@@ -532,6 +542,28 @@ class InsectColonyWarsGame {
     document.getElementById('toggleAI')?.addEventListener('click', () => {
       if (this.currentColony) {
         this.service.call('toggle_colony_ai', { colony_id: this.currentColony.id });
+      }
+    });
+    
+    document.getElementById('gatherBtn')?.addEventListener('click', () => {
+      if (this.currentColony) {
+        this.service.call('hive_command_gather', { colony_id: this.currentColony.id });
+      }
+    });
+    
+    document.getElementById('defendBtn')?.addEventListener('click', () => {
+      if (this.currentColony) {
+        this.service.call('hive_command_defend', { colony_id: this.currentColony.id });
+      }
+    });
+    
+    document.getElementById('huntBtn')?.addEventListener('click', () => {
+      if (this.currentColony) {
+        // Toggle hunt mode
+        const btn = document.getElementById('huntBtn')!;
+        btn.classList.toggle('active');
+        this.huntMode = btn.classList.contains('active');
+        btn.textContent = this.huntMode ? '⚔️ Cancel Hunt' : '⚔️ Hunt Mode';
       }
     });
   }
@@ -654,7 +686,20 @@ class InsectColonyWarsGame {
   }
 
   handleMapClick(x: number, y: number, isRightClick: boolean) {
-    if (isRightClick && this.selectedAntIds.length > 0) {
+    if (this.huntMode && isRightClick) {
+      // Send hunting party to location
+      this.service.call('hive_command_hunt', {
+        colony_id: this.currentColony!.id,
+        target_x: x,
+        target_y: y,
+        target_z: this.viewport.cameraZ
+      });
+      // Exit hunt mode
+      this.huntMode = false;
+      const btn = document.getElementById('huntBtn')!;
+      btn.classList.remove('active');
+      btn.textContent = '⚔️ Hunt Mode';
+    } else if (isRightClick && this.selectedAntIds.length > 0) {
       // Command selected ants
       this.service.call('command_ants', {
         ant_ids: this.selectedAntIds,

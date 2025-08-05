@@ -187,11 +187,11 @@ pub struct ExploredTerritory {
 fn get_ant_stats(ant_type: AntType) -> (u32, f32, u32) {
     // Returns (max_health, speed, attack_damage)
     match ant_type {
-        AntType::Queen => (200, 0.5, 0),
-        AntType::Worker => (50, 2.0, 5),
-        AntType::Soldier => (100, 1.5, 20),
-        AntType::Scout => (30, 3.0, 10),
-        AntType::Major => (150, 1.0, 30),
+        AntType::Queen => (200, 1.0, 0),
+        AntType::Worker => (50, 4.0, 5),
+        AntType::Soldier => (100, 3.0, 20),
+        AntType::Scout => (30, 6.0, 10),
+        AntType::Major => (150, 2.0, 30),
     }
 }
 
@@ -710,6 +710,147 @@ pub fn toggle_colony_ai(ctx: ReducerContext, colony_id: u32) {
     Colony::update_by_id(&colony_id, colony);
     
     log::info!("Colony {} AI toggled to: {}", colony_id, colony.ai_enabled);
+}
+
+/// Hive mind command: All units gather resources
+#[spacetimedb(reducer)]
+pub fn hive_command_gather(ctx: ReducerContext, colony_id: u32) {
+    let colony = match Colony::filter_by_id(&colony_id) {
+        Some(c) => c,
+        None => {
+            log::error!("Colony not found: {}", colony_id);
+            return;
+        }
+    };
+    
+    if colony.player_id != ctx.sender {
+        log::error!("Colony not owned by player");
+        return;
+    }
+    
+    // Find all workers and scouts
+    let ants: Vec<Ant> = Ant::iter()
+        .filter(|a| a.colony_id == colony_id && 
+               (a.ant_type == AntType::Worker || a.ant_type == AntType::Scout))
+        .collect();
+    
+    // Find nearest resource nodes
+    let resource_nodes: Vec<ResourceNode> = ResourceNode::iter()
+        .filter(|r| r.amount > 0.0)
+        .collect();
+    
+    // Assign ants to nearest resources
+    for ant in ants {
+        if let Some(nearest_resource) = resource_nodes.iter()
+            .min_by_key(|r| distance_3d(r.x, r.y, r.z, ant.x, ant.y, ant.z) as i32) {
+            
+            let mut ant_update = ant;
+            ant_update.target_x = Some(nearest_resource.x);
+            ant_update.target_y = Some(nearest_resource.y);
+            ant_update.target_z = Some(nearest_resource.z);
+            ant_update.task = TaskType::Gathering;
+            Ant::update_by_id(&ant_update.id, ant_update);
+        }
+    }
+    
+    log::info!("Colony {} commanded to gather resources", colony_id);
+}
+
+/// Hive mind command: All units return to defend
+#[spacetimedb(reducer)]
+pub fn hive_command_defend(ctx: ReducerContext, colony_id: u32) {
+    let colony = match Colony::filter_by_id(&colony_id) {
+        Some(c) => c,
+        None => {
+            log::error!("Colony not found: {}", colony_id);
+            return;
+        }
+    };
+    
+    if colony.player_id != ctx.sender {
+        log::error!("Colony not owned by player");
+        return;
+    }
+    
+    // Find queen position
+    let queen_pos = match colony.queen_id.and_then(|id| Ant::filter_by_id(&id)) {
+        Some(queen) => (queen.x, queen.y, queen.z),
+        None => {
+            log::error!("No queen found for colony");
+            return;
+        }
+    };
+    
+    // Command all ants to return to queen
+    let ants: Vec<Ant> = Ant::iter()
+        .filter(|a| a.colony_id == colony_id)
+        .collect();
+    
+    for ant in ants {
+        if ant.ant_type != AntType::Queen {
+            let mut ant_update = ant;
+            // Form defensive circle around queen
+            let angle = (ant.id as f32) * 0.5;
+            let radius = match ant.ant_type {
+                AntType::Soldier | AntType::Major => 15.0,
+                _ => 25.0,
+            };
+            ant_update.target_x = Some(queen_pos.0 + angle.cos() * radius);
+            ant_update.target_y = Some(queen_pos.1 + angle.sin() * radius);
+            ant_update.target_z = Some(queen_pos.2);
+            ant_update.task = TaskType::Returning;
+            Ant::update_by_id(&ant_update.id, ant_update);
+        }
+    }
+    
+    log::info!("Colony {} commanded to defend", colony_id);
+}
+
+/// Hive mind command: Send hunting party
+#[spacetimedb(reducer)]
+pub fn hive_command_hunt(ctx: ReducerContext, colony_id: u32, target_x: f32, target_y: f32, target_z: f32) {
+    let colony = match Colony::filter_by_id(&colony_id) {
+        Some(c) => c,
+        None => {
+            log::error!("Colony not found: {}", colony_id);
+            return;
+        }
+    };
+    
+    if colony.player_id != ctx.sender {
+        log::error!("Colony not owned by player");
+        return;
+    }
+    
+    // Select soldiers and majors for hunting party
+    let hunting_party: Vec<Ant> = Ant::iter()
+        .filter(|a| a.colony_id == colony_id && 
+               (a.ant_type == AntType::Soldier || a.ant_type == AntType::Major))
+        .collect();
+    
+    // Command hunting party to target location
+    for ant in hunting_party {
+        let mut ant_update = ant;
+        ant_update.target_x = Some(target_x);
+        ant_update.target_y = Some(target_y);
+        ant_update.target_z = Some(target_z);
+        ant_update.task = TaskType::Fighting;
+        Ant::update_by_id(&ant_update.id, ant_update);
+    }
+    
+    // Send one scout ahead
+    if let Some(scout) = Ant::iter()
+        .find(|a| a.colony_id == colony_id && a.ant_type == AntType::Scout) {
+        
+        let mut scout_update = scout;
+        scout_update.target_x = Some(target_x);
+        scout_update.target_y = Some(target_y);
+        scout_update.target_z = Some(target_z);
+        scout_update.task = TaskType::Exploring;
+        Ant::update_by_id(&scout_update.id, scout_update);
+    }
+    
+    log::info!("Colony {} hunting party dispatched to ({}, {}, {})", colony_id, target_x, target_y, target_z);
 }
 
 /// AI decision making - called periodically by the system

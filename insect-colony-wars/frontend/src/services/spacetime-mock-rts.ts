@@ -150,6 +150,15 @@ export class MockSpacetimeService {
       case 'toggle_colony_ai':
         this.toggleColonyAI(args.colony_id);
         break;
+      case 'hive_command_gather':
+        this.hiveCommandGather(args.colony_id);
+        break;
+      case 'hive_command_defend':
+        this.hiveCommandDefend(args.colony_id);
+        break;
+      case 'hive_command_hunt':
+        this.hiveCommandHunt(args.colony_id, args.target_x, args.target_y, args.target_z);
+        break;
     }
     
     this.saveState();
@@ -292,11 +301,11 @@ export class MockSpacetimeService {
     
     // Create ant
     const stats = {
-      [AntType.Queen]: { health: 200, speed: 0.5, damage: 0 },
-      [AntType.Worker]: { health: 50, speed: 2, damage: 5 },
-      [AntType.Soldier]: { health: 100, speed: 1.5, damage: 20 },
-      [AntType.Scout]: { health: 30, speed: 3, damage: 10 },
-      [AntType.Major]: { health: 150, speed: 1, damage: 30 }
+      [AntType.Queen]: { health: 200, speed: 1, damage: 0 },
+      [AntType.Worker]: { health: 50, speed: 4, damage: 5 },
+      [AntType.Soldier]: { health: 100, speed: 3, damage: 20 },
+      [AntType.Scout]: { health: 30, speed: 6, damage: 10 },
+      [AntType.Major]: { health: 150, speed: 2, damage: 30 }
     };
     
     const stat = stats[antType];
@@ -477,6 +486,91 @@ export class MockSpacetimeService {
     this.emit('Colony', this.data.Colony);
   }
   
+  private hiveCommandGather(colonyId: number) {
+    const colony = this.data.Colony.find(c => c.id === colonyId);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Find all workers and scouts
+    const ants = this.data.Ant.filter(a => 
+      a.colony_id === colonyId && 
+      (a.ant_type === AntType.Worker || a.ant_type === AntType.Scout)
+    );
+    
+    // Find resource nodes
+    const resources = this.data.ResourceNode.filter(r => r.amount > 0);
+    
+    // Assign each ant to nearest resource
+    ants.forEach(ant => {
+      const nearest = resources.sort((a, b) => {
+        const distA = Math.sqrt(Math.pow(a.x - ant.x, 2) + Math.pow(a.y - ant.y, 2) + Math.pow(a.z - ant.z, 2));
+        const distB = Math.sqrt(Math.pow(b.x - ant.x, 2) + Math.pow(b.y - ant.y, 2) + Math.pow(b.z - ant.z, 2));
+        return distA - distB;
+      })[0];
+      
+      if (nearest) {
+        ant.target_x = nearest.x;
+        ant.target_y = nearest.y;
+        ant.target_z = nearest.z;
+        ant.task = TaskType.Gathering;
+      }
+    });
+    
+    this.emit('Ant', this.data.Ant);
+  }
+  
+  private hiveCommandDefend(colonyId: number) {
+    const colony = this.data.Colony.find(c => c.id === colonyId);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Find queen
+    const queen = this.data.Ant.find(a => 
+      a.colony_id === colonyId && a.ant_type === AntType.Queen
+    );
+    if (!queen) return;
+    
+    // Command all ants to form defensive circle
+    const ants = this.data.Ant.filter(a => 
+      a.colony_id === colonyId && a.ant_type !== AntType.Queen
+    );
+    
+    ants.forEach((ant, index) => {
+      const angle = (index * Math.PI * 2) / ants.length;
+      const radius = ant.ant_type === AntType.Soldier || ant.ant_type === AntType.Major ? 15 : 25;
+      
+      ant.target_x = queen.x + Math.cos(angle) * radius;
+      ant.target_y = queen.y + Math.sin(angle) * radius;
+      ant.target_z = queen.z;
+      ant.task = TaskType.Returning;
+    });
+    
+    this.emit('Ant', this.data.Ant);
+  }
+  
+  private hiveCommandHunt(colonyId: number, targetX: number, targetY: number, targetZ: number) {
+    const colony = this.data.Colony.find(c => c.id === colonyId);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Send all soldiers and majors
+    const huntingParty = this.data.Ant.filter(a => 
+      a.colony_id === colonyId && 
+      (a.ant_type === AntType.Soldier || a.ant_type === AntType.Major)
+    );
+    
+    // Send one scout ahead
+    const scout = this.data.Ant.find(a => 
+      a.colony_id === colonyId && a.ant_type === AntType.Scout
+    );
+    
+    [...huntingParty, scout].filter(Boolean).forEach(ant => {
+      ant!.target_x = targetX;
+      ant!.target_y = targetY;
+      ant!.target_z = targetZ;
+      ant!.task = ant!.ant_type === AntType.Scout ? TaskType.Exploring : TaskType.Fighting;
+    });
+    
+    this.emit('Ant', this.data.Ant);
+  }
+  
   private updateGame() {
     let antsChanged = false;
     let coloniesChanged = false;
@@ -492,7 +586,7 @@ export class MockSpacetimeService {
         
         if (distance > 1) {
           // Move towards target
-          const moveDistance = ant.speed * 0.1; // Speed per frame
+          const moveDistance = ant.speed * 0.2; // Doubled speed per frame
           ant.x += (dx / distance) * moveDistance;
           ant.y += (dy / distance) * moveDistance;
           ant.z += (dz / distance) * moveDistance;
