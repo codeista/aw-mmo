@@ -98,7 +98,7 @@ class UndergroundViewport {
   private ctx: CanvasRenderingContext2D;
   private cameraX: number = 0;
   private cameraY: number = 0;
-  private cameraZ: number = -10;
+  public cameraZ: number = -10;
   private zoom: number = 1;
   private selectedAnts: Set<number> = new Set();
   private isDragging: boolean = false;
@@ -160,8 +160,9 @@ class UndergroundViewport {
   }
 
   private resize() {
-    this.canvas.width = this.canvas.offsetWidth;
-    this.canvas.height = this.canvas.offsetHeight;
+    this.canvas.width = this.canvas.offsetWidth || 800;
+    this.canvas.height = this.canvas.offsetHeight || 600;
+    console.log('Canvas resized to:', this.canvas.width, 'x', this.canvas.height);
   }
 
   private worldToScreen(x: number, y: number, z: number): [number, number] {
@@ -173,6 +174,10 @@ class UndergroundViewport {
   }
 
   render(ants: Ant[], colonies: Colony[], chambers: Chamber[], resources: ResourceNode[]) {
+    if (!this.canvas.width || !this.canvas.height) {
+      this.resize();
+    }
+    
     // Clear canvas
     this.ctx.fillStyle = '#1a1a1a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -368,9 +373,9 @@ class InsectColonyWarsGame {
   private service: any; // Will be SpacetimeService or MockService
 
   constructor() {
+    this.setupUI();
     const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
     this.viewport = new UndergroundViewport(canvas);
-    this.setupUI();
     this.startRenderLoop();
   }
 
