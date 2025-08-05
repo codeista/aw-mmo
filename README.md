@@ -1,6 +1,6 @@
-# SpacetimeDB Game Development Toolkit
+# SpacetimeDB MMO Game Development
 
-A comprehensive toolkit for planning and creating proof of concept games using SpacetimeDB as the backend and TypeScript as the frontend.
+A collection of multiplayer game experiments built with SpacetimeDB, featuring different genres and gameplay styles. Each game is developed on its own branch with shared infrastructure.
 
 ## 🚀 Quick Start
 
@@ -12,17 +12,32 @@ chmod +x game-planning-agent.js
 ./game-planning-agent.js
 ```
 
-## 📦 What's Included
+## 🎮 Game Projects
 
-### 1. Game Planning Agent (`game-planning-agent.js`)
-A simple, interactive CLI tool that helps you:
-- Define your game concept and features
-- Generate project structure automatically
-- Create boilerplate code for SpacetimeDB and TypeScript
-- View examples and best practices
+### Current Games:
+1. **Fight or Die** (`human-war-tactics` branch)
+   - Turn-based tactical combat
+   - 5x5 grid with terrain effects
+   - Status: Playable Phase 1
 
-### 2. Advanced Agent (`spacetimedb-game-agent.ts`)
-A more sophisticated TypeScript-based agent with additional features (requires npm dependencies).
+2. **Insect Colony Wars** (Planned)
+   - Real-time strategy MMO
+   - Resource gathering & warfare
+   - Status: Design phase
+
+See [GAME-DESIGNS.md](./GAME-DESIGNS.md) for all game concepts.
+
+## 🛠️ Development Tools
+
+### Game Planning Agent (`game-planning-agent.js`)
+- Interactive CLI for new games
+- Generates SpacetimeDB + TypeScript boilerplate
+- Supports multiple game types
+
+### AI Agent Framework (`.agents/`)
+- Architecture enforcement
+- Design validation  
+- Code quality checks
 
 ## 🎮 Supported Game Types
 
