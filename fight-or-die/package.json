@@ -1,0 +1,8 @@
+{
+  "name": "fight-or-die",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "echo 'Run spacetime dev in backend/ and npm run dev in frontend/'",
+    "generate": "spacetime generate --lang typescript --out-dir frontend/src/module_bindings --project-path backend"
+  }
+}

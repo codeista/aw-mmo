@@ -1,0 +1,25 @@
+{
+  "name": "Fight or Die Dev Environment",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "spacetimedb",
+  "workspaceFolder": "/app",
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  "forwardPorts": [3000, 5173],
+  
+  "postCreateCommand": "cd /app/backend && spacetime dev",
+  
+  "remoteUser": "root"
+}

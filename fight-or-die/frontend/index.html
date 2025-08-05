@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fight or Die - Tactical Combat</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+        background-color: #1a1a1a;
+        color: #fff;
+      }
+      #app {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .game-container {
+        display: flex;
+        gap: 20px;
+      }
+      .board-section {
+        flex: 1;
+      }
+      .info-section {
+        width: 300px;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(5, 80px);
+        grid-template-rows: repeat(5, 80px);
+        gap: 2px;
+        background-color: #333;
+        padding: 10px;
+        border-radius: 8px;
+      }
+      .tile {
+        width: 80px;
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        position: relative;
+        border: 2px solid #444;
+        font-size: 12px;
+        flex-direction: column;
+      }
+      .tile.plains {
+        background-color: #90EE90;
+      }
+      .tile.forest {
+        background-color: #228B22;
+      }
+      .tile.mountain {
+        background-color: #8B7355;
+      }
+      .tile.selected {
+        border-color: #FFD700;
+        box-shadow: 0 0 10px #FFD700;
+      }
+      .tile.valid-move {
+        border-color: #00FF00;
+        opacity: 0.8;
+      }
+      .tile.valid-attack {
+        border-color: #FF0000;
+        opacity: 0.8;
+      }
+      .unit {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: white;
+        position: absolute;
+      }
+      .unit.player1 {
+        background-color: #4169E1;
+      }
+      .unit.player2 {
+        background-color: #DC143C;
+      }
+      .unit.current-turn {
+        box-shadow: 0 0 15px #FFD700;
+      }
+      .hp-bar {
+        position: absolute;
+        bottom: 2px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 70px;
+        height: 6px;
+        background-color: #333;
+        border: 1px solid #000;
+      }
+      .hp-fill {
+        height: 100%;
+        background-color: #00FF00;
+        transition: width 0.3s;
+      }
+      .info-panel {
+        background-color: #2a2a2a;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      button {
+        background-color: #4169E1;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        font-size: 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin: 5px;
+      }
+      button:hover {
+        background-color: #1E90FF;
+      }
+      button:disabled {
+        background-color: #666;
+        cursor: not-allowed;
+      }
+      .action-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .terrain-label {
+        font-size: 10px;
+        color: #000;
+        background-color: rgba(255,255,255,0.7);
+        padding: 2px 4px;
+        border-radius: 3px;
+        position: absolute;
+        top: 2px;
+        right: 2px;
+      }
+      .status-message {
+        padding: 10px;
+        background-color: #333;
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <h1>Fight or Die</h1>
+      <div id="login-screen">
+        <h2>Enter Your Name</h2>
+        <input type="text" id="username" placeholder="Username" />
+        <button id="login-btn">Join Battle</button>
+      </div>
+      <div id="game-screen" style="display: none;">
+        <div class="game-container">
+          <div class="board-section">
+            <div id="board" class="board"></div>
+          </div>
+          <div class="info-section">
+            <div class="info-panel">
+              <h3>Game Status</h3>
+              <div id="status-message" class="status-message">Waiting...</div>
+              <div id="turn-info"></div>
+              <div id="unit-info"></div>
+            </div>
+            <div class="info-panel">
+              <h3>Actions</h3>
+              <div class="action-buttons">
+                <button id="create-game-btn">Create New Game</button>
+                <button id="join-game-btn">Join Game</button>
+                <button id="end-turn-btn" style="display: none;">End Turn</button>
+              </div>
+            </div>
+            <div class="info-panel">
+              <h3>Available Games</h3>
+              <div id="games-list"></div>
+            </div>
+            <div class="info-panel" style="margin-top: 20px;">
+              <h3>Development</h3>
+              <button id="clear-data-btn" style="background-color: #dc3545;">Clear All Data</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

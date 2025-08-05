@@ -1,0 +1,12 @@
+{
+  "name": "fight or die",
+  "description": "fight against the opposing players until you are the last standing",
+  "type": "turnbased",
+  "features": [
+    "authentication",
+    "movement",
+    "chat",
+    "leaderboards",
+    "matchmaking"
+  ]
+}
