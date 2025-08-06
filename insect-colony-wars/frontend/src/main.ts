@@ -1,4 +1,5 @@
 import './style.css';
+import { createImprovedUI, addAlert, updateThreatLevel, updateUnitBreakdown } from './ui-redesign';
 
 // Types matching the backend
 export enum AntType {
@@ -652,6 +653,11 @@ class UndergroundViewport {
       this.ctx.restore();
     }
     
+    // Draw tunnels between chambers first (underground only)
+    if (isUnderground) {
+      this.drawChamberConnections(chambers);
+    }
+    
     // Draw chambers based on view
     chambers.forEach(chamber => {
       // Viewport culling
@@ -975,9 +981,105 @@ class UndergroundViewport {
     });
   }
   
+  private drawChamberConnections(chambers: Chamber[]) {
+    // Group chambers by colony and Z level
+    const chambersByColony = new Map<number, Chamber[]>();
+    chambers.forEach(chamber => {
+      // Only connect underground chambers
+      if (chamber.z >= 0) return;
+      if (!this.isInViewport(chamber.x, chamber.y)) return;
+      
+      if (!chambersByColony.has(chamber.colony_id)) {
+        chambersByColony.set(chamber.colony_id, []);
+      }
+      chambersByColony.get(chamber.colony_id)!.push(chamber);
+    });
+    
+    // Draw tunnels between chambers of same colony
+    chambersByColony.forEach((colonyChambers, colonyId) => {
+      // Connect each chamber to nearby chambers
+      for (let i = 0; i < colonyChambers.length; i++) {
+        for (let j = i + 1; j < colonyChambers.length; j++) {
+          const chamber1 = colonyChambers[i];
+          const chamber2 = colonyChambers[j];
+          
+          // Only connect chambers on same Z level or within 10 units vertically
+          if (Math.abs(chamber1.z - chamber2.z) > 10) continue;
+          
+          // Calculate distance
+          const dist = Math.sqrt(
+            Math.pow(chamber1.x - chamber2.x, 2) + 
+            Math.pow(chamber1.y - chamber2.y, 2)
+          );
+          
+          // Only connect if within reasonable distance (150 units)
+          if (dist > 150) continue;
+          
+          // Draw tunnel
+          const [x1, y1] = this.worldToScreen(chamber1.x, chamber1.y, chamber1.z);
+          const [x2, y2] = this.worldToScreen(chamber2.x, chamber2.y, chamber2.z);
+          
+          // Tunnel style
+          this.ctx.save();
+          this.ctx.strokeStyle = '#2a1a0a';
+          this.ctx.lineWidth = 15 * this.zoom;
+          this.ctx.lineCap = 'round';
+          
+          // Draw tunnel background (carved earth)
+          this.ctx.beginPath();
+          this.ctx.moveTo(x1, y1);
+          this.ctx.lineTo(x2, y2);
+          this.ctx.stroke();
+          
+          // Draw tunnel interior
+          this.ctx.strokeStyle = '#1a1a1a';
+          this.ctx.lineWidth = 12 * this.zoom;
+          this.ctx.beginPath();
+          this.ctx.moveTo(x1, y1);
+          this.ctx.lineTo(x2, y2);
+          this.ctx.stroke();
+          
+          // Add slight gradient for depth
+          const gradient = this.ctx.createLinearGradient(x1, y1, x2, y2);
+          gradient.addColorStop(0, 'rgba(0, 0, 0, 0.3)');
+          gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.1)');
+          gradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+          this.ctx.strokeStyle = gradient;
+          this.ctx.lineWidth = 10 * this.zoom;
+          this.ctx.beginPath();
+          this.ctx.moveTo(x1, y1);
+          this.ctx.lineTo(x2, y2);
+          this.ctx.stroke();
+          
+          this.ctx.restore();
+        }
+      }
+    });
+  }
+  
   private drawUndergroundChamber(chamber: Chamber) {
     const [x, y] = this.worldToScreen(chamber.x, chamber.y, chamber.z);
-    const size = 50 * this.zoom; // Increased chamber size
+    // Much larger chambers for more space
+    let size = 80 * this.zoom; // Base size increased from 50 to 80
+    
+    // Different sizes for different chamber types
+    switch (chamber.chamber_type) {
+      case ChamberType.ThroneRoom:
+        size = 100 * this.zoom; // Largest for the queen
+        break;
+      case ChamberType.Burrow:
+        size = 90 * this.zoom; // Main entrance needs space
+        break;
+      case ChamberType.Barracks:
+        size = 120 * this.zoom; // Barracks need lots of space for soldiers
+        break;
+      case ChamberType.Storage:
+        size = 70 * this.zoom; // Storage can be smaller
+        break;
+      case ChamberType.Nursery:
+        size = 85 * this.zoom; // Nursery needs room for larvae
+        break;
+    }
     
     // Enhanced 2.5D carved chamber visualization
     this.ctx.save();
@@ -2827,114 +2929,7 @@ class InsectColonyWarsGame {
     });
     
     const app = document.getElementById('app')!;
-    app.innerHTML = `
-      <div id="gameContainer">
-        <canvas id="gameCanvas"></canvas>
-        
-        <div id="topBar" class="ui-panel">
-          <div id="playerInfo">
-            <span id="playerName">Not connected</span>
-            <span id="colonyStats">No colony</span>
-            <span id="generationInfo" style="color: #FFD700;">Gen: 0 | Queens: 0</span>
-            <button id="respawnBtn" class="action-btn" style="margin-left: 10px;">🔄 Respawn</button>
-            <button id="autoSpawnToggle" class="action-btn" style="margin-left: 5px;" title="Toggle auto-spawn mode">🎯 Auto</button>
-          </div>
-          <div id="resources">
-            <span class="resource">🍎 Food: <span id="food">0</span></span>
-            <span class="resource">💧 Water: <span id="water">0</span></span>
-            <span class="resource">⛏️ Minerals: <span id="minerals">0</span></span>
-            <span class="resource">🥚 Larvae: <span id="larvae">0</span></span>
-            <span class="resource">👑 Jelly: <span id="queenJelly">0</span></span>
-            <span class="resource">🐜 Pop: <span id="population">0</span>/<span id="popCapacity">0</span></span>
-          </div>
-          <div id="viewToggle">
-            <button id="surfaceBtn" class="view-btn">🌍 Surface</button>
-            <button id="undergroundBtn" class="view-btn active">⛏️ Underground</button>
-            <span id="zLevelDisplay" style="margin-left: 10px; color: #999;">Z: -10</span>
-          </div>
-        </div>
-        
-        <div id="bottomBar" class="ui-panel compact">
-          <button id="createColonyBtn" class="action-btn" style="display: block;">Create Colony</button>
-          <div id="colonyActions" style="display: none; width: 100%;">
-            <div class="action-tabs">
-              <button class="tab-btn active" data-tab="units">🐜 Units</button>
-              <button class="tab-btn" data-tab="build">🏗️ Build</button>
-              <button class="tab-btn" data-tab="commands">⚔️ Commands</button>
-            </div>
-            <div class="tab-content" id="unitsTab" style="display: flex;">
-              <button class="compact-btn" id="spawnLarvaBtn" title="Queen spawns larva">🥚<br><small>0.5👑</small></button>
-              <div class="divider"></div>
-              <button class="compact-btn spawn-btn" data-ant="Worker" title="1 pop">⚒️<br><small>2👑/1p</small></button>
-              <button class="compact-btn spawn-btn" data-ant="Scout" title="1 pop">🔍<br><small>2.5👑/1p</small></button>
-              <button class="compact-btn spawn-btn" data-ant="Soldier" title="2 pop">⚔️<br><small>3👑/2p</small></button>
-              <button class="compact-btn spawn-btn" data-ant="RoyalWorker" title="5 pop">🍯<br><small>5👑/5p</small></button>
-              <button class="compact-btn spawn-btn" data-ant="Major" title="5 pop">🛡️<br><small>5👑/5p</small></button>
-              <button class="compact-btn spawn-btn special" data-ant="YoungQueen" title="10 pop + Throne Room">👸<br><small>50👑/10p</small></button>
-            </div>
-            <div class="tab-content" id="buildTab" style="display: none;">
-              <button class="compact-btn chamber-btn" data-chamber="Burrow" title="Resource outpost">🕳️<br><small>5⛏️</small></button>
-              <button class="compact-btn chamber-btn" data-chamber="Nursery" title="+5 pop">🥚<br><small>10⛏️ +5p</small></button>
-              <button class="compact-btn chamber-btn" data-chamber="Storage" title="+5 pop">📦<br><small>20⛏️ +5p</small></button>
-              <button class="compact-btn chamber-btn" data-chamber="Barracks" title="+20 pop">⚔️<br><small>50⛏️ +20p</small></button>
-              <button class="compact-btn chamber-btn" data-chamber="ThroneRoom" title="For queens">👑<br><small>30⛏️</small></button>
-            </div>
-            <div class="tab-content" id="commandsTab" style="display: none;">
-              <button class="compact-btn command-btn" id="gatherBtn">⚒️<br><small>Gather</small></button>
-              <button class="compact-btn command-btn" id="defendBtn">🛡️<br><small>Defend</small></button>
-              <button class="compact-btn command-btn" id="huntBtn">⚔️<br><small>Hunt</small></button>
-              <button class="compact-btn command-btn" id="digBtn">⛏️<br><small>Dig</small></button>
-              <button class="compact-btn command-btn" id="produceJellyBtn">🍯<br><small>Produce</small></button>
-              <button class="compact-btn command-btn special" id="flyAwayBtn">✈️<br><small>Fly</small></button>
-              <button class="compact-btn action-btn" id="toggleAI">🤖<br><small id="aiStatus">OFF</small></button>
-            </div>
-          </div>
-          <div id="selection" style="margin-left: auto; min-width: 200px; text-align: right;">
-            <div id="selectedInfo">No selection</div>
-          </div>
-        </div>
-        
-        <div id="chat" class="ui-panel">
-          <div id="chatMessages"></div>
-          <input type="text" id="chatInput" placeholder="Type to chat..." />
-        </div>
-        
-        <div id="unitPanel" class="ui-panel">
-          <h3>Units</h3>
-          <div id="unitList"></div>
-          <div style="margin-top: 10px; font-size: 11px; color: #666;">
-            ESC: Clear • Ctrl+A: Select All<br>
-            Click: Select • Shift+Click: Add<br>
-            Double-click group: Select type
-          </div>
-        </div>
-        
-        <div id="taskPanel" class="ui-panel" style="display: none;">
-          <h3>Assign Task</h3>
-          <div id="selectedUnitInfo"></div>
-          <div class="task-buttons">
-            <button class="task-btn" data-task="gather">🍎 Gather Food</button>
-            <button class="task-btn" data-task="scout">🔍 Scout Area</button>
-            <button class="task-btn" data-task="guard">🛡️ Guard Position</button>
-            <button class="task-btn" data-task="patrol">🚶 Patrol Route</button>
-            <button class="task-btn" data-task="dig">⛏️ Dig Here</button>
-            <button class="task-btn" data-task="hunt">🎯 Hunt Prey</button>
-            <button class="task-btn" data-task="follow">👥 Follow Target</button>
-            <button class="task-btn" data-task="idle">💤 Stand Idle</button>
-          </div>
-        </div>
-        
-        <div id="placementMode" class="placement-overlay" style="display: none;">
-          <div class="placement-info">
-            <h2>🌍 New World Generated!</h2>
-            <p>Click anywhere on the map to land your queen</p>
-            <p style="color: #90EE90;">A fresh landscape awaits with new resources, prey, and dangers</p>
-            <p style="color: #FFD700;">You start with 20 queen jelly and 1 worker</p>
-            <button id="cancelPlacement" class="action-btn">Cancel</button>
-          </div>
-        </div>
-      </div>
-    `;
+    app.innerHTML = createImprovedUI();
 
     // Setup event listeners
     document.getElementById('createColonyBtn')!.addEventListener('click', () => {

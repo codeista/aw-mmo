@@ -666,7 +666,7 @@ export class MockSpacetimeService {
         y,
         z: -5,
         level: 1,
-        capacity: 10 // Initial capacity for 10 population points
+        capacity: 20 // Increased initial capacity from 10 to 20 for more starting space
       };
       
       this.data.Chamber.push(burrow);
@@ -1172,6 +1172,34 @@ export class MockSpacetimeService {
       if (chamberType === ChamberType.Burrow) {
         console.log('Workers cannot build burrows, only queens can');
         return;
+      }
+      
+      // Smart positioning: suggest building near existing chambers for connectivity
+      const existingChambers = this.data.Chamber.filter(ch => 
+        ch.colony_id === colony.id && Math.abs(ch.z - z) < 10
+      );
+      
+      if (existingChambers.length > 0) {
+        // Find nearest chamber
+        const nearestChamber = existingChambers.sort((a, b) => {
+          const distA = Math.sqrt(Math.pow(a.x - x, 2) + Math.pow(a.y - y, 2));
+          const distB = Math.sqrt(Math.pow(b.x - x, 2) + Math.pow(b.y - y, 2));
+          return distA - distB;
+        })[0];
+        
+        const dist = Math.sqrt(Math.pow(nearestChamber.x - x, 2) + Math.pow(nearestChamber.y - y, 2));
+        
+        // Suggest optimal distance for expansion (80-120 units apart)
+        if (dist < 60) {
+          console.log('⚠️ Too close to existing chamber! Build at least 60 units away for better spacing.');
+          // Auto-adjust position
+          const angle = Math.atan2(y - nearestChamber.y, x - nearestChamber.x);
+          x = nearestChamber.x + Math.cos(angle) * 100;
+          y = nearestChamber.y + Math.sin(angle) * 100;
+          console.log(`📍 Adjusted to (${Math.round(x)}, ${Math.round(y)}) for better spacing`);
+        } else if (dist > 150) {
+          console.log('⚠️ Warning: >150 units from nearest chamber - won\'t auto-connect with tunnels');
+        }
       }
     } else {
       console.log('Only queens and workers can build');
@@ -3175,16 +3203,16 @@ export class MockSpacetimeService {
     chambers.forEach(chamber => {
       switch (chamber.chamber_type) {
         case ChamberType.Burrow:
-          capacity += 10; // Each burrow provides 10 population points
+          capacity += 20; // Increased: Each burrow provides 20 population points
           break;
         case ChamberType.Barracks:
-          capacity += 20; // Each barracks adds 20 population points
+          capacity += 30; // Increased: Each barracks adds 30 population points
           break;
         case ChamberType.Nursery:
-          capacity += 5; // Nurseries add small capacity
+          capacity += 10; // Increased: Nurseries add 10 capacity
           break;
         case ChamberType.Storage:
-          capacity += 5; // Storage adds small capacity
+          capacity += 15; // Increased: Storage adds moderate capacity
           break;
       }
     });
