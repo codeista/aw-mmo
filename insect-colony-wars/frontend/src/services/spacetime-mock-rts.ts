@@ -1,5 +1,5 @@
 // Mock SpacetimeDB service for RTS development
-import { AntType, ResourceType, ChamberType, TaskType } from '../main';
+import { AntType, ResourceType, ChamberType, TaskType, AntTrait } from '../main';
 
 interface MockData {
   Player: any[];
@@ -10,6 +10,12 @@ interface MockData {
   ResourceNode: any[];
   Pheromone: any[];
   Battle: any[];
+  ExploredTerritory: any[];
+  DiscoveredResource: any[];
+  Obstacle: any[];
+  Prey: any[];
+  Predator: any[];
+  Larva: any[];
 }
 
 export class MockSpacetimeService {
@@ -23,7 +29,13 @@ export class MockSpacetimeService {
     Chamber: [],
     ResourceNode: [],
     Pheromone: [],
-    Battle: []
+    Battle: [],
+    ExploredTerritory: [],
+    DiscoveredResource: [],
+    Obstacle: [],
+    Prey: [],
+    Predator: [],
+    Larva: []
   };
   private nextId = {
     colony: 1,
@@ -31,8 +43,15 @@ export class MockSpacetimeService {
     tunnel: 1,
     chamber: 1,
     pheromone: 1,
-    battle: 1
+    battle: 1,
+    explored: 1,
+    discovered: 1,
+    obstacle: 1,
+    prey: 1,
+    predator: 1,
+    larva: 1
   };
+  private queenDigTracking: Map<number, { startTime: number, x: number, y: number, colonyId: number }> = new Map();
   private gameUpdateInterval: number | null = null;
 
   constructor() {
@@ -43,10 +62,15 @@ export class MockSpacetimeService {
     
     // Initialize resource nodes
     this.initializeResources();
+    
+    // Initialize surface entities
+    this.initializeSurfaceEntities();
   }
 
   private initializeResources() {
     this.data.ResourceNode = [
+      // All resources on surface (z = 0)
+      // Food resources
       {
         id: 1,
         resource_type: ResourceType.Food,
@@ -69,25 +93,363 @@ export class MockSpacetimeService {
       },
       {
         id: 3,
-        resource_type: ResourceType.Minerals,
-        x: 100,
-        y: -100,
-        z: -20,
-        amount: 1000,
-        max_amount: 1000,
-        regeneration_rate: 1
+        resource_type: ResourceType.Food,
+        x: 150,
+        y: 75,
+        z: 0,
+        amount: 1500,
+        max_amount: 1500,
+        regeneration_rate: 2
       },
       {
         id: 4,
-        resource_type: ResourceType.Minerals,
+        resource_type: ResourceType.Food,
+        x: -120,
+        y: 60,
+        z: 0,
+        amount: 800,
+        max_amount: 800,
+        regeneration_rate: 1
+      },
+      // Water resources (puddles, dew drops)
+      {
+        id: 5,
+        resource_type: ResourceType.Water,
+        x: 80,
+        y: -40,
+        z: 0,
+        amount: 1200,
+        max_amount: 1200,
+        regeneration_rate: 2
+      },
+      {
+        id: 6,
+        resource_type: ResourceType.Water,
         x: -100,
         y: 100,
-        z: -20,
-        amount: 1000,
+        z: 0,
+        amount: 1500,
+        max_amount: 1500,
+        regeneration_rate: 3
+      },
+      {
+        id: 7,
+        resource_type: ResourceType.Water,
+        x: 0,
+        y: -150,
+        z: 0,
+        amount: 2000,
+        max_amount: 2000,
+        regeneration_rate: 4
+      },
+      // Note: Minerals now come from digging underground
+    ];
+  }
+  
+  private generateNewWorld() {
+    // Clear ID counters for new world
+    this.nextId.obstacle = 1;
+    this.nextId.prey = 1;
+    this.nextId.predator = 1;
+    
+    // Generate new resources
+    this.generateResources();
+    
+    // Generate new surface entities
+    this.generateSurfaceEntities();
+    
+    // Emit all the new world data
+    this.emit('ResourceNode', this.data.ResourceNode);
+    this.emit('Obstacle', this.data.Obstacle);
+    this.emit('Prey', this.data.Prey);
+    this.emit('Predator', this.data.Predator);
+  }
+  
+  private generateResources() {
+    // Generate random resource distribution
+    const numFoodSources = 8 + Math.floor(Math.random() * 5); // 8-12 food sources
+    const numWaterSources = 4 + Math.floor(Math.random() * 3); // 4-6 water sources
+    
+    for (let i = 0; i < numFoodSources; i++) {
+      const x = (Math.random() - 0.5) * 600;
+      const y = (Math.random() - 0.5) * 600;
+      this.data.ResourceNode.push({
+        id: i + 1,
+        resource_type: ResourceType.Food,
+        x,
+        y,
+        z: 0,
+        amount: 500 + Math.random() * 1500,
+        max_amount: 2000,
+        regeneration_rate: 1 + Math.random() * 2
+      });
+    }
+    
+    for (let i = 0; i < numWaterSources; i++) {
+      const x = (Math.random() - 0.5) * 600;
+      const y = (Math.random() - 0.5) * 600;
+      this.data.ResourceNode.push({
+        id: numFoodSources + i + 1,
+        resource_type: ResourceType.Water,
+        x,
+        y,
+        z: 0,
+        amount: 300 + Math.random() * 700,
         max_amount: 1000,
-        regeneration_rate: 1
+        regeneration_rate: 0.5 + Math.random()
+      });
+    }
+  }
+  
+  private generateSurfaceEntities() {
+    // Generate obstacles
+    const numObstacles = 15 + Math.floor(Math.random() * 20); // 15-35 obstacles
+    for (let i = 0; i < numObstacles; i++) {
+      const types = ['rock', 'plant', 'log', 'leaf'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      
+      this.data.Obstacle.push({
+        id: this.nextId.obstacle++,
+        obstacle_type: type,
+        x: (Math.random() - 0.5) * 800,
+        y: (Math.random() - 0.5) * 800,
+        width: 10 + Math.random() * 30,
+        height: 10 + Math.random() * 30,
+        blocks_movement: type === 'rock' || type === 'log'
+      });
+    }
+    
+    // Generate prey
+    const numPrey = 10 + Math.floor(Math.random() * 15); // 10-25 prey
+    for (let i = 0; i < numPrey; i++) {
+      const types = ['aphid', 'caterpillar', 'termite'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      
+      const stats = {
+        aphid: { health: 20, speed: 1, food: 30 },
+        caterpillar: { health: 40, speed: 0.5, food: 60 },
+        termite: { health: 30, speed: 1.5, food: 40 }
+      };
+      
+      const stat = stats[type as keyof typeof stats];
+      
+      this.data.Prey.push({
+        id: this.nextId.prey++,
+        prey_type: type,
+        x: (Math.random() - 0.5) * 600,
+        y: (Math.random() - 0.5) * 600,
+        health: stat.health,
+        max_health: stat.health,
+        speed: stat.speed,
+        food_value: stat.food,
+        flee_distance: 30
+      });
+    }
+    
+    // Generate predators - start with fewer, will increase over time
+    const numPredators = 3 + Math.floor(Math.random() * 3); // 3-5 predators initially
+    for (let i = 0; i < numPredators; i++) {
+      const types = ['spider', 'bird', 'beetle'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      
+      const stats = {
+        spider: { health: 100, speed: 2, damage: 25 },
+        bird: { health: 80, speed: 4, damage: 30 },
+        beetle: { health: 120, speed: 1.5, damage: 20 }
+      };
+      
+      const stat = stats[type as keyof typeof stats];
+      
+      this.data.Predator.push({
+        id: this.nextId.predator++,
+        predator_type: type,
+        x: (Math.random() - 0.5) * 800,
+        y: (Math.random() - 0.5) * 800,
+        health: stat.health,
+        max_health: stat.health,
+        speed: stat.speed,
+        attack_damage: stat.damage,
+        hunt_radius: 50 + Math.random() * 50,
+        target_ant_id: null
+      });
+    }
+  }
+  
+  private initializeSurfaceEntities() {
+    // Add obstacles
+    this.data.Obstacle = [
+      // Rocks
+      {
+        id: 1,
+        obstacle_type: 'rock',
+        x: 30,
+        y: -20,
+        width: 20,
+        height: 20,
+        blocks_movement: true
+      },
+      {
+        id: 2,
+        obstacle_type: 'rock',
+        x: -60,
+        y: 40,
+        width: 25,
+        height: 25,
+        blocks_movement: true
+      },
+      // Plants
+      {
+        id: 3,
+        obstacle_type: 'plant',
+        x: 100,
+        y: 20,
+        width: 15,
+        height: 30,
+        blocks_movement: false
+      },
+      {
+        id: 4,
+        obstacle_type: 'plant',
+        x: -80,
+        y: -30,
+        width: 20,
+        height: 35,
+        blocks_movement: false
+      },
+      // Logs
+      {
+        id: 5,
+        obstacle_type: 'log',
+        x: 0,
+        y: 80,
+        width: 40,
+        height: 10,
+        blocks_movement: true
+      },
+      // Leaves
+      {
+        id: 6,
+        obstacle_type: 'leaf',
+        x: -40,
+        y: -80,
+        width: 30,
+        height: 20,
+        blocks_movement: false
       }
     ];
+    
+    // Add prey
+    this.data.Prey = [
+      {
+        id: 1,
+        prey_type: 'aphid',
+        x: 70,
+        y: 30,
+        health: 10,
+        max_health: 10,
+        speed: 0.5,
+        food_value: 15,
+        flee_distance: 30
+      },
+      {
+        id: 2,
+        prey_type: 'aphid',
+        x: -50,
+        y: 20,
+        health: 10,
+        max_health: 10,
+        speed: 0.5,
+        food_value: 15,
+        flee_distance: 30
+      },
+      {
+        id: 3,
+        prey_type: 'caterpillar',
+        x: 120,
+        y: -40,
+        health: 20,
+        max_health: 20,
+        speed: 0.3,
+        food_value: 30,
+        flee_distance: 40
+      },
+      {
+        id: 4,
+        prey_type: 'termite',
+        x: -90,
+        y: 70,
+        health: 15,
+        max_health: 15,
+        speed: 0.8,
+        food_value: 20,
+        flee_distance: 35
+      }
+    ];
+    
+    // Add predators
+    this.data.Predator = [
+      {
+        id: 1,
+        predator_type: 'spider',
+        x: 150,
+        y: 100,
+        health: 50,
+        max_health: 50,
+        speed: 1.2,
+        attack_damage: 15,
+        hunt_radius: 60,
+        target_ant_id: null
+      },
+      {
+        id: 2,
+        predator_type: 'beetle',
+        x: -130,
+        y: -90,
+        health: 40,
+        max_health: 40,
+        speed: 1.0,
+        attack_damage: 10,
+        hunt_radius: 50,
+        target_ant_id: null
+      }
+    ];
+    
+    // Emit initial data
+    this.emit('Obstacle', this.data.Obstacle);
+    this.emit('Prey', this.data.Prey);
+    this.emit('Predator', this.data.Predator);
+  }
+  
+  private generateRandomTraitForType(antType: AntType): AntTrait | undefined {
+    // No traits for RoyalWorker or base Queen
+    if (antType === AntType.RoyalWorker || antType === AntType.Queen) {
+      return undefined;
+    }
+    
+    const random = Math.random() * 100;
+    
+    // Different trait pools for different ant types
+    switch (antType) {
+      case AntType.YoungQueen:
+        const queenTraits = [AntTrait.Fertile, AntTrait.Matriarch, AntTrait.Survivor];
+        return queenTraits[Math.floor(Math.random() * queenTraits.length)];
+        
+      case AntType.Worker:
+        const workerTraits = [AntTrait.Strong, AntTrait.Swift, AntTrait.Efficient, AntTrait.Industrious, AntTrait.Pheromone];
+        return workerTraits[Math.floor(Math.random() * workerTraits.length)];
+        
+      case AntType.Soldier:
+      case AntType.Major:
+        const combatTraits = [AntTrait.AcidSpray, AntTrait.Venomous, AntTrait.Armored, AntTrait.Regenerator];
+        return combatTraits[Math.floor(Math.random() * combatTraits.length)];
+        
+      case AntType.Scout:
+        const scoutTraits = [AntTrait.Swift, AntTrait.Scout, AntTrait.Climber, AntTrait.Pheromone];
+        return scoutTraits[Math.floor(Math.random() * scoutTraits.length)];
+        
+      default:
+        return undefined;
+    }
   }
 
   async connect(): Promise<void> {
@@ -95,6 +457,16 @@ export class MockSpacetimeService {
     
     // Load saved state from localStorage
     this.loadState();
+    
+    // Clean up dead colonies and orphaned ants
+    this.cleanupDeadData();
+    
+    // Create player if it doesn't exist for this identity
+    const existingPlayer = this.data.Player.find(p => p.id === this.identity);
+    if (!existingPlayer) {
+      console.log('Creating new player for identity:', this.identity);
+      this.createPlayer('Queen');
+    }
     
     // Start game update loop
     this.startGameLoop();
@@ -106,6 +478,13 @@ export class MockSpacetimeService {
       this.emit('Ant', this.data.Ant);
       this.emit('Chamber', this.data.Chamber);
       this.emit('ResourceNode', this.data.ResourceNode);
+      this.emit('ExploredTerritory', this.data.ExploredTerritory);
+      this.emit('DiscoveredResource', this.data.DiscoveredResource);
+      this.emit('Larva', this.data.Larva);
+      this.emit('Tunnel', this.data.Tunnel);
+      this.emit('Obstacle', this.data.Obstacle);
+      this.emit('Prey', this.data.Prey);
+      this.emit('Predator', this.data.Predator);
     }, 100);
   }
 
@@ -122,7 +501,30 @@ export class MockSpacetimeService {
   }
 
   async call(method: string, args: any): Promise<void> {
-    console.log(`Mock call: ${method}`, args);
+    // Enhanced logging with timestamp and formatted output
+    const timestamp = new Date().toLocaleTimeString();
+    console.group(`🎮 [${timestamp}] User Action: ${method}`);
+    console.log('📊 Arguments:', args);
+    
+    // Log specific details based on action type
+    switch (method) {
+      case 'spawn_larva':
+        console.log('🥚 Queen spawning larva');
+        break;
+      case 'feed_larva':
+        console.log(`🐜 Creating ${args.ant_type} from larva`);
+        break;
+      case 'command_ants':
+        console.log(`📍 Moving ${args.ant_ids.length} ants to (${Math.round(args.target_x)}, ${Math.round(args.target_y)})`);
+        break;
+      case 'build_chamber':
+        console.log(`🏗️ Building ${args.chamber_type}`);
+        break;
+      case 'respawn_as_queen':
+        console.log(`👑 Respawning at (${Math.round(args.x)}, ${Math.round(args.y)})`);
+        break;
+    }
+    console.groupEnd();
     
     switch (method) {
       case 'create_player':
@@ -134,11 +536,20 @@ export class MockSpacetimeService {
       case 'spawn_ant':
         this.spawnAnt(args.colony_id, args.ant_type, args.x, args.y, args.z);
         break;
+      case 'spawn_larva':
+        this.spawnLarva(args.queen_id);
+        break;
+      case 'feed_larva':
+        this.feedLarva(args.colony_id, args.ant_type, args.x, args.y, args.z);
+        break;
+      case 'produce_jelly':
+        this.produceJelly(args.ant_id);
+        break;
       case 'command_ants':
-        this.commandAnts(args.ant_ids, args.target_x, args.target_y, args.target_z);
+        this.commandAnts(args.ant_ids, args.target_x, args.target_y, args.target_z, args.task_override);
         break;
       case 'build_chamber':
-        this.buildChamber(args.colony_id, args.chamber_type, args.x, args.y, args.z);
+        this.buildChamber(args.ant_id, args.chamber_type, args.x, args.y, args.z);
         break;
       case 'dig_tunnel':
         this.digTunnel(args.colony_id, args.start_x, args.start_y, args.start_z, 
@@ -161,6 +572,12 @@ export class MockSpacetimeService {
         break;
       case 'respawn_as_queen':
         this.respawnAsQueen(args.x, args.y);
+        break;
+      case 'dig_at_location':
+        this.digAtLocation(args.ant_ids, args.target_x, args.target_y, args.target_z);
+        break;
+      case 'nuptial_flight':
+        this.nuptialFlight(args.queen_id);
         break;
     }
     
@@ -192,19 +609,20 @@ export class MockSpacetimeService {
       id: colonyId,
       player_id: this.identity,
       queen_id: null,
-      food: 100,
+      food: 0,
+      water: 0,
       minerals: 0,
-      larvae: 5,
-      queen_jelly: 100,
+      larvae: 0,
+      queen_jelly: 20, // Start with minimal jelly
       population: 1,
-      territory_radius: 50,
+      territory_radius: 30,
       created_at: Date.now(),
-      ai_enabled: true
+      ai_enabled: false
     };
     
     this.data.Colony.push(colony);
     
-    // Create queen
+    // Create queen on surface
     const queenId = this.nextId.ant++;
     const queen = {
       id: queenId,
@@ -212,68 +630,72 @@ export class MockSpacetimeService {
       ant_type: AntType.Queen,
       x,
       y,
-      z: -10,
+      z: 0, // Start on surface
       health: 200,
       max_health: 200,
       carrying_resource: null,
       carrying_amount: 0,
-      task: TaskType.Idle,
-      target_x: null,
-      target_y: null,
-      target_z: null,
+      task: TaskType.Building, // Queen starts digging
+      target_x: x,
+      target_y: y,
+      target_z: -5,
       speed: 0.5,
-      attack_damage: 0
+      attack_damage: 50,
+      jelly_consumption_rate: 0,
+      last_fed_at: Date.now()
     };
     
     this.data.Ant.push(queen);
     colony.queen_id = queenId;
     
-    // Create throne room
-    const throneId = this.nextId.chamber++;
-    const throne = {
-      id: throneId,
-      colony_id: colonyId,
-      chamber_type: ChamberType.ThroneRoom,
-      x,
-      y,
-      z: -10,
-      level: 1,
-      capacity: 1
-    };
+    console.log(`Queen ${queenId} is digging the initial burrow at (${x}, ${y})...`);
     
-    this.data.Chamber.push(throne);
-    
-    // Create initial workers
-    for (let i = 0; i < 5; i++) {
-      const workerId = this.nextId.ant++;
-      const worker = {
-        id: workerId,
+    // Schedule burrow creation after dig time
+    setTimeout(() => {
+      const queenAnt = this.data.Ant.find(a => a.id === queenId);
+      const col = this.data.Colony.find(c => c.id === colonyId);
+      if (!queenAnt || !col) return;
+      
+      // Create the initial burrow
+      const burrowId = this.nextId.chamber++;
+      const burrow = {
+        id: burrowId,
         colony_id: colonyId,
-        ant_type: AntType.Worker,
-        x: x + (i * 2 - 4),
-        y: y + (i * 2 - 4),
-        z: -10,
-        health: 50,
-        max_health: 50,
-        carrying_resource: null,
-        carrying_amount: 0,
-        task: TaskType.Idle,
-        target_x: null,
-        target_y: null,
-        target_z: null,
-        speed: 2,
-        attack_damage: 5
+        chamber_type: ChamberType.Burrow,
+        x,
+        y,
+        z: -5,
+        level: 1,
+        capacity: 10 // Initial capacity for 10 population points
       };
-      this.data.Ant.push(worker);
-    }
+      
+      this.data.Chamber.push(burrow);
+      
+      // Move queen underground
+      queenAnt.x = x;
+      queenAnt.y = y;
+      queenAnt.z = -5;
+      queenAnt.task = TaskType.Idle;
+      queenAnt.target_x = null;
+      queenAnt.target_y = null;
+      queenAnt.target_z = null;
+      
+      // Queen lays first larva
+      col.larvae = 1;
+      col.queen_jelly -= 0.5;
+      
+      console.log('Burrow complete! Queen laid first larva. Space for 4 more larvae.');
+      
+      this.emit('Chamber', this.data.Chamber);
+      this.emit('Ant', this.data.Ant);
+      this.emit('Colony', this.data.Colony);
+    }, 5000); // 5 seconds to dig initial burrow
     
-    colony.population = 6;
     player.total_colonies++;
     
     this.emit('Player', this.data.Player);
     this.emit('Colony', this.data.Colony);
     this.emit('Ant', this.data.Ant);
-    this.emit('Chamber', this.data.Chamber);
   }
 
   private spawnAnt(colonyId: number, antType: AntType, x: number, y: number, z: number) {
@@ -304,8 +726,9 @@ export class MockSpacetimeService {
     
     // Create ant
     const stats = {
-      [AntType.Queen]: { health: 200, speed: 1, damage: 0 },
+      [AntType.Queen]: { health: 200, speed: 0.5, damage: 50 },
       [AntType.Worker]: { health: 50, speed: 4, damage: 5 },
+      [AntType.RoyalWorker]: { health: 40, speed: 0.5, damage: 0 },
       [AntType.Soldier]: { health: 100, speed: 3, damage: 20 },
       [AntType.Scout]: { health: 30, speed: 6, damage: 10 },
       [AntType.Major]: { health: 150, speed: 2, damage: 30 }
@@ -329,7 +752,10 @@ export class MockSpacetimeService {
       target_y: null,
       target_z: null,
       speed: stat.speed,
-      attack_damage: stat.damage
+      attack_damage: stat.damage,
+      jelly_consumption_rate: this.getJellyConsumptionRate(antType),
+      last_fed_at: Date.now(),
+      maturation_time: antType === AntType.YoungQueen ? Date.now() + 300000 : undefined
     };
     
     this.data.Ant.push(ant);
@@ -339,7 +765,11 @@ export class MockSpacetimeService {
     this.emit('Ant', this.data.Ant);
   }
 
-  private commandAnts(antIds: number[], targetX: number, targetY: number, targetZ: number) {
+  private commandAnts(antIds: number[], targetX: number, targetY: number, targetZ: number, taskOverride?: string) {
+    // Calculate total jelly cost
+    let totalJellyCost = 0;
+    const validAnts: any[] = [];
+    
     antIds.forEach(antId => {
       const ant = this.data.Ant.find(a => a.id === antId);
       if (!ant) return;
@@ -347,36 +777,426 @@ export class MockSpacetimeService {
       const colony = this.data.Colony.find(c => c.id === ant.colony_id);
       if (!colony || colony.player_id !== this.identity) return;
       
-      ant.target_x = targetX;
-      ant.target_y = targetY;
-      ant.target_z = targetZ;
-      ant.task = TaskType.Exploring;
+      // Calculate distance and jelly cost (0.01 jelly per unit distance)
+      const distance = Math.sqrt(
+        Math.pow(targetX - ant.x, 2) +
+        Math.pow(targetY - ant.y, 2) +
+        Math.pow(targetZ - ant.z, 2)
+      );
+      const jellyCost = distance * 0.01;
+      totalJellyCost += jellyCost;
+      validAnts.push({ ant, colony });
     });
     
-    this.emit('Ant', this.data.Ant);
+    // Check if colony has enough jelly
+    if (validAnts.length > 0) {
+      const colony = validAnts[0].colony;
+      if (colony.queen_jelly < totalJellyCost) {
+        console.warn('Not enough queen jelly for movement. Need', totalJellyCost, 'have', colony.queen_jelly);
+        return;
+      }
+      
+      // Deduct jelly
+      colony.queen_jelly -= totalJellyCost;
+      
+      // Move ants with proper underground navigation
+      antIds.forEach(antId => {
+        const ant = this.data.Ant.find(a => a.id === antId);
+        if (!ant) return;
+        
+        // Check if ant needs to enter/exit burrow for underground movement
+        const isUnderground = ant.z < -5;
+        const targetIsOnSurface = targetZ >= 0;
+        
+        console.log(`🔍 Ant ${ant.id} routing: z=${ant.z} -> targetZ=${targetZ}, underground=${isUnderground}, targetSurface=${targetIsOnSurface}`);
+        
+        if (!isUnderground && targetZ < -5) {
+          // Need to find nearest burrow entrance to go underground
+          const burrows = this.data.Chamber.filter(ch => 
+            ch.colony_id === ant.colony_id && 
+            ch.chamber_type === ChamberType.Burrow
+          );
+          
+          if (burrows.length > 0) {
+            // Find nearest burrow
+            const nearestBurrow = burrows.sort((a, b) => {
+              const distA = Math.sqrt(Math.pow(a.x - ant.x, 2) + Math.pow(a.y - ant.y, 2));
+              const distB = Math.sqrt(Math.pow(b.x - ant.x, 2) + Math.pow(b.y - ant.y, 2));
+              return distA - distB;
+            })[0];
+            
+            // First go to burrow entrance on surface
+            ant.target_x = nearestBurrow.x;
+            ant.target_y = nearestBurrow.y;
+            ant.target_z = 0; // Surface entrance
+            ant.task = TaskType.Entering;
+            
+            // Store final destination for later
+            (ant as any).final_target_x = targetX;
+            (ant as any).final_target_y = targetY;
+            (ant as any).final_target_z = targetZ;
+            (ant as any).final_task = taskOverride || TaskType.Idle;
+            return;
+          }
+        } else if (isUnderground && targetIsOnSurface) {
+          // Need to exit through burrow to go to surface
+          const burrows = this.data.Chamber.filter(ch => 
+            ch.colony_id === ant.colony_id && 
+            ch.chamber_type === ChamberType.Burrow
+          );
+          
+          console.log(`🚪 Ant ${ant.id} needs to exit. Found ${burrows.length} burrows for colony ${ant.colony_id}`);
+          
+          if (burrows.length > 0) {
+            // Find the deep burrow chamber (not the entrance) closest to ant
+            const deepBurrows = burrows.filter(b => !b.is_entrance && b.z < -5);
+            if (deepBurrows.length === 0) {
+              console.log(`⚠️ No deep burrow chamber found for exiting`);
+              return;
+            }
+            
+            const nearestBurrow = deepBurrows.sort((a, b) => {
+              const distA = Math.sqrt(Math.pow(a.x - ant.x, 2) + Math.pow(a.y - ant.y, 2) + Math.pow(a.z - ant.z, 2));
+              const distB = Math.sqrt(Math.pow(b.x - ant.x, 2) + Math.pow(b.y - ant.y, 2) + Math.pow(b.z - ant.z, 2));
+              return distA - distB;
+            })[0];
+            
+            console.log(`📍 Routing ant ${ant.id} through burrow at (${nearestBurrow.x}, ${nearestBurrow.y}, ${nearestBurrow.z})`);
+            
+            // First go to burrow underground chamber
+            ant.target_x = nearestBurrow.x;
+            ant.target_y = nearestBurrow.y;
+            ant.target_z = nearestBurrow.z;
+            ant.task = TaskType.Exiting;
+            
+            // Store final destination
+            (ant as any).final_target_x = targetX;
+            (ant as any).final_target_y = targetY;
+            (ant as any).final_target_z = targetZ;
+            (ant as any).final_task = taskOverride || TaskType.Idle;
+            return;
+          }
+        }
+        
+        // Direct movement if already in correct layer or no burrow available
+        ant.target_x = targetX;
+        ant.target_y = targetY;
+        ant.target_z = targetZ;
+        
+        // Set task based on override or context
+        if (taskOverride) {
+          switch (taskOverride) {
+            case 'gather':
+              ant.task = TaskType.Gathering;
+              break;
+            case 'scout':
+              ant.task = TaskType.Exploring;
+              break;
+            case 'guard':
+              ant.task = TaskType.Idle; // Guards stay in place
+              break;
+            case 'hunt':
+              ant.task = TaskType.Fighting;
+              break;
+            case 'idle':
+              ant.task = TaskType.Idle;
+              break;
+            default:
+              ant.task = TaskType.Exploring;
+          }
+        } else {
+          ant.task = TaskType.Exploring;
+        }
+      });
+      
+      this.emit('Colony', this.data.Colony);
+      this.emit('Ant', this.data.Ant);
+    }
   }
 
-  private buildChamber(colonyId: number, chamberType: ChamberType, x: number, y: number, z: number) {
+  private spawnLarva(queenId: number) {
+    const queen = this.data.Ant.find(a => a.id === queenId);
+    if (!queen || queen.ant_type !== AntType.Queen) return;
+    
+    const colony = this.data.Colony.find(c => c.id === queen.colony_id);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Check if queen has energy (jelly) to produce larva
+    if (colony.queen_jelly < 0.5) {
+      console.log('Not enough queen jelly to spawn larva');
+      return;
+    }
+    
+    // Check if queen is already laying
+    if ((queen as any).laying_start_time) {
+      console.log('Queen is already laying an egg');
+      return;
+    }
+    
+    // Check larvae capacity in queen's chamber
+    const queenChamber = this.data.Chamber.find(ch => 
+      ch.colony_id === colony.id && 
+      ch.x === queen.x && 
+      ch.y === queen.y && 
+      ch.z === queen.z
+    );
+    
+    if (queenChamber) {
+      // Initialize larvae tracking if not present
+      if (queenChamber.larvae_count === undefined) {
+        queenChamber.larvae_count = 0;
+      }
+      if (queenChamber.larvae_capacity === undefined) {
+        queenChamber.larvae_capacity = 5;
+      }
+      
+      // Check if chamber has reached larvae capacity
+      if (queenChamber.larvae_count >= queenChamber.larvae_capacity) {
+        console.log(`Chamber at capacity! ${queenChamber.larvae_count}/${queenChamber.larvae_capacity} larvae`);
+        return;
+      }
+    }
+    
+    // Start laying process
+    (queen as any).laying_start_time = Date.now();
+    queen.task = TaskType.Depositing; // Use depositing as "laying" status
+    colony.queen_jelly -= 0.5; // Deduct jelly immediately
+    
+    this.emit('Ant', this.data.Ant);
+    this.emit('Colony', this.data.Colony);
+    console.log(`Queen started laying an egg`);
+  }
+  
+  private feedLarva(colonyId: number, antType: AntType, x: number, y: number, z: number) {
     const colony = this.data.Colony.find(c => c.id === colonyId);
     if (!colony || colony.player_id !== this.identity) return;
     
-    // Check resources
+    if (colony.larvae < 1) {
+      console.log('No larvae available');
+      return;
+    }
+    
+    // Check population capacity
+    const currentPop = this.calculateColonyPopulation(colonyId);
+    const maxPop = this.calculateColonyCapacity(colonyId);
+    const unitCost = this.getUnitPopulationCost(antType);
+    
+    if (currentPop + unitCost > maxPop) {
+      console.log(`Population cap reached! ${currentPop}/${maxPop} used. Need ${unitCost} points for ${antType}`);
+      alert(`Population cap reached! Build more barracks to increase capacity.\nCurrent: ${currentPop}/${maxPop} points`);
+      return;
+    }
+    
+    // Check if young queen requires throne room
+    if (antType === AntType.YoungQueen && !this.hasRoyalChamber(colonyId)) {
+      console.log('Young queens require a Throne Room!');
+      alert('You need a Throne Room to produce Young Queens!');
+      return;
+    }
+    
+    // Calculate jelly cost for transformation
+    const jellyCost = {
+      [AntType.Worker]: 2,
+      [AntType.RoyalWorker]: 5,
+      [AntType.Soldier]: 3,
+      [AntType.Scout]: 2.5,
+      [AntType.Major]: 5,
+      [AntType.Queen]: 999, // Cannot transform into queen
+      [AntType.YoungQueen]: 50 // Expensive to create new queens
+    };
+    
+    const cost = jellyCost[antType];
+    if (!cost || cost > 100) {
+      console.log('Cannot transform larva into', antType);
+      return;
+    }
+    
+    // Special handling for first worker
+    const isFirstWorker = colony.population === 1 && antType === AntType.Worker;
+    const actualCost = isFirstWorker ? 1 : cost;
+    
+    if (colony.queen_jelly < actualCost) {
+      console.log('Not enough queen jelly to transform larva');
+      return;
+    }
+    
+    // Young queens also need food and water
+    if (antType === AntType.YoungQueen) {
+      if (colony.food < 50 || colony.water < 20) {
+        console.log('Not enough resources for young queen (need 50 food, 20 water)');
+        return;
+      }
+      colony.food -= 50;
+      colony.water -= 20;
+    }
+    
+    colony.queen_jelly -= actualCost;
+    colony.larvae -= 1;
+    
+    // Find and remove the closest larva
+    const larvaeInChamber = this.data.Larva.filter(l => 
+      l.colony_id === colonyId &&
+      Math.abs(l.x - x) < 30 &&
+      Math.abs(l.y - y) < 30 &&
+      l.z === z
+    );
+    
+    if (larvaeInChamber.length > 0) {
+      // Remove the oldest larva
+      const oldestLarva = larvaeInChamber.reduce((oldest, current) => 
+        current.created_at < oldest.created_at ? current : oldest
+      );
+      
+      this.data.Larva = this.data.Larva.filter(l => l.id !== oldestLarva.id);
+      this.emit('Larva', this.data.Larva);
+    }
+    
+    // Decrease larvae count in the chamber
+    const chamber = this.data.Chamber.find(ch => 
+      ch.colony_id === colonyId && 
+      ch.x === x && 
+      ch.y === y && 
+      ch.z === z
+    );
+    
+    if (chamber && chamber.larvae_count && chamber.larvae_count > 0) {
+      chamber.larvae_count -= 1;
+      this.emit('Chamber', this.data.Chamber);
+    }
+    
+    // Create the ant
+    const stats = {
+      [AntType.Queen]: { health: 200, speed: 0.5, damage: 50 },
+      [AntType.YoungQueen]: { health: 150, speed: 4, damage: 15 },
+      [AntType.Worker]: { health: 50, speed: 4, damage: 5 },
+      [AntType.RoyalWorker]: { health: 40, speed: 0.5, damage: 0 },
+      [AntType.Soldier]: { health: 100, speed: 3, damage: 20 },
+      [AntType.Scout]: { health: 30, speed: 6, damage: 10 },
+      [AntType.Major]: { health: 150, speed: 2, damage: 30 }
+    };
+    
+    const stat = stats[antType];
+    const antId = this.nextId.ant++;
+    const ant = {
+      id: antId,
+      colony_id: colonyId,
+      ant_type: antType,
+      x,
+      y,
+      z,
+      health: stat.health,
+      max_health: stat.health,
+      carrying_resource: null,
+      carrying_amount: 0,
+      task: TaskType.Idle,
+      target_x: null,
+      target_y: null,
+      target_z: null,
+      speed: stat.speed,
+      attack_damage: stat.damage,
+      jelly_consumption_rate: this.getJellyConsumptionRate(antType),
+      last_fed_at: Date.now(),
+      maturation_time: antType === AntType.YoungQueen ? Date.now() + 300000 : undefined
+    };
+    
+    // Add trait for all ants except RoyalWorker and base Queen
+    const trait = this.generateRandomTraitForType(antType);
+    if (trait) {
+      (ant as any).trait_type = trait;
+    }
+    
+    this.data.Ant.push(ant);
+    colony.population++;
+    
+    this.emit('Colony', this.data.Colony);
+    this.emit('Ant', this.data.Ant);
+    console.log('Larva transformed into', antType);
+  }
+  
+  private produceJelly(antId: number) {
+    const ant = this.data.Ant.find(a => a.id === antId);
+    if (!ant || ant.ant_type !== AntType.RoyalWorker) return;
+    
+    const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Check if in burrow
+    const inBurrow = this.data.Chamber.some(ch => 
+      ch.colony_id === colony.id && 
+      ch.chamber_type === ChamberType.Burrow &&
+      Math.sqrt(Math.pow(ant.x - ch.x, 2) + Math.pow(ant.y - ch.y, 2) + Math.pow(ant.z - ch.z, 2)) < 10
+    );
+    
+    if (!inBurrow) {
+      console.log('Royal workers must be in a burrow to produce jelly');
+      return;
+    }
+    
+    // Check if has food and water to convert
+    if (colony.food < 5 || colony.water < 2) {
+      console.log('Not enough resources to produce jelly (need 5 food and 2 water)');
+      return;
+    }
+    
+    // Convert food and water to jelly
+    colony.food -= 5;
+    colony.water -= 2;
+    colony.queen_jelly += 3; // Better conversion with water
+    
+    this.emit('Colony', this.data.Colony);
+    console.log('Royal worker produced 3 jelly from 5 food and 2 water');
+  }
+  
+  private buildChamber(antId: number, chamberType: ChamberType, x: number, y: number, z: number) {
+    const ant = this.data.Ant.find(a => a.id === antId);
+    if (!ant) return;
+    
+    const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Check ant permissions
+    if (ant.ant_type === AntType.Queen) {
+      if (chamberType !== ChamberType.Burrow) {
+        console.log('Queens can only build burrows');
+        return;
+      }
+      // Check if colony already has a burrow
+      const hasBurrow = this.data.Chamber.some(ch => 
+        ch.colony_id === colony.id && ch.chamber_type === ChamberType.Burrow
+      );
+      if (hasBurrow) {
+        console.log('Colony already has a burrow. Only one burrow allowed.');
+        return;
+      }
+    } else if (ant.ant_type === AntType.Worker) {
+      if (chamberType === ChamberType.Burrow) {
+        console.log('Workers cannot build burrows, only queens can');
+        return;
+      }
+    } else {
+      console.log('Only queens and workers can build');
+      return;
+    }
+    
+    // Check resources (now uses minerals from digging and water)
     const costs = {
-      [ChamberType.Nursery]: { food: 50, minerals: 10 },
-      [ChamberType.Storage]: { food: 30, minerals: 20 },
-      [ChamberType.Barracks]: { food: 100, minerals: 50 },
-      [ChamberType.ThroneRoom]: { food: 200, minerals: 100 }
+      [ChamberType.Nursery]: { minerals: 10, water: 5, jelly: 0 },
+      [ChamberType.Storage]: { minerals: 20, water: 10, jelly: 0 },
+      [ChamberType.Barracks]: { minerals: 50, water: 20, jelly: 0 },
+      [ChamberType.ThroneRoom]: { minerals: 100, water: 50, jelly: 0 },
+      [ChamberType.Burrow]: { minerals: 5, water: 5, jelly: 10 }
     };
     
     const cost = costs[chamberType];
-    if (colony.food < cost.food || colony.minerals < cost.minerals) {
-      console.log('Not enough resources for chamber');
+    if (colony.minerals < cost.minerals || colony.water < cost.water || colony.queen_jelly < cost.jelly) {
+      console.log('Not enough resources for chamber (need minerals from digging)');
       return;
     }
     
     // Deduct resources
-    colony.food -= cost.food;
     colony.minerals -= cost.minerals;
+    colony.water -= cost.water;
+    colony.queen_jelly -= cost.jelly;
     
     // Create chamber
     const chamberId = this.nextId.chamber++;
@@ -525,27 +1345,56 @@ export class MockSpacetimeService {
     const colony = this.data.Colony.find(c => c.id === colonyId);
     if (!colony || colony.player_id !== this.identity) return;
     
-    // Find queen
-    const queen = this.data.Ant.find(a => 
-      a.colony_id === colonyId && a.ant_type === AntType.Queen
-    );
-    if (!queen) return;
+    // Find the main burrow (or any chamber underground)
+    const chambers = this.data.Chamber.filter(ch => ch.colony_id === colonyId);
+    const burrow = chambers.find(ch => ch.chamber_type === ChamberType.Burrow);
+    const underground = chambers.find(ch => ch.z < -5) || burrow;
     
-    // Command all ants to form defensive circle
-    const ants = this.data.Ant.filter(a => 
-      a.colony_id === colonyId && a.ant_type !== AntType.Queen
-    );
+    if (!underground) {
+      console.log('No underground chambers found for defense!');
+      return;
+    }
     
-    ants.forEach((ant, index) => {
-      const angle = (index * Math.PI * 2) / ants.length;
-      const radius = ant.ant_type === AntType.Soldier || ant.ant_type === AntType.Major ? 15 : 25;
-      
-      ant.target_x = queen.x + Math.cos(angle) * radius;
-      ant.target_y = queen.y + Math.sin(angle) * radius;
-      ant.target_z = queen.z;
-      ant.task = TaskType.Returning;
+    // Command all ants to retreat underground
+    const ants = this.data.Ant.filter(a => a.colony_id === colonyId);
+    
+    ants.forEach((ant) => {
+      // Different defensive positions based on ant type
+      if (ant.ant_type === AntType.Queen) {
+        // Queen stays deep underground in the safest chamber
+        const safeRoom = chambers.find(ch => ch.chamber_type === ChamberType.ThroneRoom) || 
+                         chambers.find(ch => ch.chamber_type === ChamberType.RoyalChamber) || 
+                         underground;
+        ant.target_x = safeRoom.x;
+        ant.target_y = safeRoom.y;
+        ant.target_z = safeRoom.z;
+        ant.task = TaskType.Returning;
+      } else if (ant.ant_type === AntType.Soldier || ant.ant_type === AntType.Major) {
+        // Soldiers defend near the burrow entrance underground
+        const defenseRadius = 20;
+        const angle = Math.random() * Math.PI * 2;
+        ant.target_x = underground.x + Math.cos(angle) * defenseRadius;
+        ant.target_y = underground.y + Math.sin(angle) * defenseRadius;
+        ant.target_z = underground.z;
+        ant.task = TaskType.Returning;
+      } else if (ant.ant_type === AntType.RoyalWorker) {
+        // Royal workers stay deep with the queen
+        ant.target_x = underground.x + (Math.random() - 0.5) * 10;
+        ant.target_y = underground.y + (Math.random() - 0.5) * 10;
+        ant.target_z = underground.z;
+        ant.task = TaskType.Returning;
+      } else {
+        // Other ants spread out underground
+        const spreadRadius = 30;
+        const angle = Math.random() * Math.PI * 2;
+        ant.target_x = underground.x + Math.cos(angle) * spreadRadius;
+        ant.target_y = underground.y + Math.sin(angle) * spreadRadius;
+        ant.target_z = underground.z;
+        ant.task = TaskType.Returning;
+      }
     });
     
+    console.log(`Colony ${colonyId} retreating to burrow defense! All units going underground.`);
     this.emit('Ant', this.data.Ant);
   }
   
@@ -574,7 +1423,192 @@ export class MockSpacetimeService {
     this.emit('Ant', this.data.Ant);
   }
   
+  private nuptialFlight(queenId: number) {
+    const queen = this.data.Ant.find(a => a.id === queenId);
+    if (!queen || queen.ant_type !== AntType.YoungQueen) return;
+    
+    const colony = this.data.Colony.find(c => c.id === queen.colony_id);
+    if (!colony || colony.player_id !== this.identity) return;
+    
+    // Store the trait for the new colony
+    const queenTrait = (queen as any).trait_type || AntTrait.Survivor;
+    
+    // Update player stats
+    const player = this.data.Player.find(p => p.id === this.identity);
+    if (player) {
+      player.queens_produced = (player.queens_produced || 0) + 1;
+      player.generations_survived = (player.generations_survived || 0) + 1;
+      
+      // Calculate colony score based on resources gathered, population, etc.
+      const colonyScore = Math.floor(
+        colony.food + colony.water + colony.minerals * 2 + 
+        colony.population * 10 + 
+        colony.queen_jelly * 5
+      );
+      
+      if (colonyScore > (player.best_colony_score || 0)) {
+        player.best_colony_score = colonyScore;
+      }
+      
+      this.emit('Player', this.data.Player);
+    }
+    
+    // Remove the young queen
+    this.data.Ant = this.data.Ant.filter(a => a.id !== queenId);
+    colony.population--;
+    
+    // Show success message
+    console.log(`Young queen has flown away! Generation ${player?.generations_survived || 1} complete!`);
+    alert(`Success! Your young queen has flown away to start generation ${(player?.generations_survived || 0) + 1}!`);
+    
+    // Emit updates
+    this.emit('Ant', this.data.Ant);
+    this.emit('Colony', this.data.Colony);
+    
+    // Emit placement mode event to trigger the "New World Generated" popup
+    this.emit('PlacementMode', { enabled: true });
+    
+    // Automatically start new generation with the young queen after a delay
+    setTimeout(() => {
+      this.respawnAsQueenWithTrait(
+        (Math.random() - 0.5) * 300, 
+        (Math.random() - 0.5) * 300,
+        queenTrait
+      );
+    }, 1000);
+  }
+  
+  private setWorkerToGather(workerId: number) {
+    const worker = this.data.Ant.find(a => a.id === workerId);
+    if (!worker || worker.ant_type !== AntType.Worker) return;
+    
+    console.log(`🐜 Setting worker ${workerId} to gather. Current position: (${worker.x}, ${worker.y}, ${worker.z})`);
+    
+    // Find nearest discovered food resource
+    const colony = this.data.Colony.find(c => c.id === worker.colony_id);
+    if (!colony) return;
+    
+    const discoveredResources = this.data.DiscoveredResource.filter(dr => dr.colony_id === colony.id);
+    const foodResources = discoveredResources
+      .map(dr => this.data.ResourceNode.find(r => r.id === dr.resource_id))
+      .filter(r => r && r.resource_type === ResourceType.Food && r.amount > 0);
+    
+    console.log(`Found ${foodResources.length} discovered food resources`);
+    
+    if (foodResources.length > 0) {
+      // Find closest food resource
+      let closest = foodResources[0];
+      let minDist = Infinity;
+      foodResources.forEach(r => {
+        if (r) {
+          const dist = Math.sqrt(
+            Math.pow(r.x - worker.x, 2) + 
+            Math.pow(r.y - worker.y, 2) + 
+            Math.pow(r.z - worker.z, 2)
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            closest = r;
+          }
+        }
+      });
+      
+      if (closest) {
+        console.log(`🐜 Worker ${workerId} at z=${worker.z} assigned to gather from food at (${closest.x}, ${closest.y}, ${closest.z})`);
+        console.log(`Worker is underground: ${worker.z < -5}, Target is surface: ${closest.z >= 0}`);
+        // Use commandAnts which handles burrow navigation
+        this.commandAnts([workerId], closest.x, closest.y, closest.z, 'gather');
+      }
+    } else {
+      console.log(`🔍 No discovered food resources. Worker will idle until scout discovers some.`);
+    }
+  }
+
+  private digAtLocation(antIds: number[], targetX: number, targetY: number, targetZ: number) {
+    // Command workers to dig at location
+    antIds.forEach(antId => {
+      const ant = this.data.Ant.find(a => a.id === antId);
+      if (!ant || ant.ant_type !== AntType.Worker) return;
+      
+      const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+      if (!colony || colony.player_id !== this.identity) return;
+      
+      // Set ant to digging task
+      ant.task = TaskType.Digging;
+      ant.target_x = targetX;
+      ant.target_y = targetY;
+      ant.target_z = targetZ;
+      
+      // Create underground resources after a delay (simulating digging)
+      setTimeout(() => {
+        // Check if ant is still digging
+        const stillDigging = this.data.Ant.find(a => a.id === antId && a.task === TaskType.Digging);
+        if (stillDigging) {
+          // Chance to find water or minerals underground
+          const chance = Math.random();
+          if (chance < 0.3) {
+            // Found water!
+            const waterNode: ResourceNode = {
+              id: this.nextId.resource++,
+              resource_type: ResourceType.Water,
+              x: targetX + (Math.random() - 0.5) * 20,
+              y: targetY + (Math.random() - 0.5) * 20,
+              z: targetZ,
+              amount: 50 + Math.random() * 50,
+              max_amount: 100,
+              regeneration_rate: 0.1
+            };
+            this.data.ResourceNode.push(waterNode);
+            this.emit('ResourceNode', this.data.ResourceNode);
+            
+            // Auto-discover for the colony
+            this.data.DiscoveredResource.push({
+              colony_id: colony.id,
+              resource_id: waterNode.id
+            });
+            this.emit('DiscoveredResource', this.data.DiscoveredResource);
+          } else if (chance < 0.6) {
+            // Found minerals!
+            const mineralNode: ResourceNode = {
+              id: this.nextId.resource++,
+              resource_type: ResourceType.Minerals,
+              x: targetX + (Math.random() - 0.5) * 20,
+              y: targetY + (Math.random() - 0.5) * 20,
+              z: targetZ,
+              amount: 30 + Math.random() * 40,
+              max_amount: 70,
+              regeneration_rate: 0
+            };
+            this.data.ResourceNode.push(mineralNode);
+            this.emit('ResourceNode', this.data.ResourceNode);
+            
+            // Auto-discover for the colony
+            this.data.DiscoveredResource.push({
+              colony_id: colony.id,
+              resource_id: mineralNode.id
+            });
+            this.emit('DiscoveredResource', this.data.DiscoveredResource);
+            
+            // Also give immediate minerals to the colony
+            colony.minerals += 5;
+            this.emit('Colony', this.data.Colony);
+          }
+          
+          // Ant finishes digging
+          stillDigging.task = TaskType.Idle;
+          this.emit('Ant', this.data.Ant);
+        }
+      }, 3000); // 3 seconds to dig
+    });
+    
+    this.emit('Ant', this.data.Ant);
+  }
+  
   private respawnAsQueen(x: number, y: number) {
+    this.respawnAsQueenWithTrait(x, y, undefined);
+  }
+  
+  private respawnAsQueenWithTrait(x: number, y: number, trait?: AntTrait) {
     const player = this.data.Player.find(p => p.id === this.identity);
     if (!player) {
       // Create player if doesn't exist
@@ -588,36 +1622,112 @@ export class MockSpacetimeService {
       this.data.Player.push(newPlayer);
     }
     
-    // Delete old colonies
-    this.data.Colony = this.data.Colony.filter(c => c.player_id !== this.identity);
-    this.data.Ant = this.data.Ant.filter(a => {
-      const colony = this.data.Colony.find(c => c.id === a.colony_id);
-      return colony && colony.player_id !== this.identity;
-    });
-    this.data.Chamber = this.data.Chamber.filter(ch => {
-      const colony = this.data.Colony.find(c => c.id === ch.colony_id);
-      return colony && colony.player_id !== this.identity;
-    });
+    // Clear ALL world data (not just player's) to regenerate map
+    console.log('Regenerating entire world...');
     
-    // Create new minimal colony
+    // Clear all entities
+    this.data.ResourceNode = [];
+    this.data.Obstacle = [];
+    this.data.Prey = [];
+    this.data.Predator = [];
+    
+    // Regenerate world with new layout
+    this.generateNewWorld();
+    
+    // Find all colonies belonging to this player
+    const playerColonyIds = this.data.Colony
+      .filter(c => c.player_id === this.identity)
+      .map(c => c.id);
+    
+    console.log('Respawning: Found player colonies:', playerColonyIds);
+    console.log('Before filtering: Ants:', this.data.Ant.length, 'Colonies:', this.data.Colony.length);
+    
+    // Delete all entities belonging to player's colonies
+    this.data.Ant = this.data.Ant.filter(a => !playerColonyIds.includes(a.colony_id));
+    this.data.Chamber = this.data.Chamber.filter(ch => !playerColonyIds.includes(ch.colony_id));
+    this.data.ExploredTerritory = this.data.ExploredTerritory.filter(et => !playerColonyIds.includes(et.colony_id));
+    this.data.DiscoveredResource = this.data.DiscoveredResource.filter(dr => !playerColonyIds.includes(dr.colony_id));
+    
+    // Delete the colonies themselves
+    this.data.Colony = this.data.Colony.filter(c => c.player_id !== this.identity);
+    
+    console.log('After filtering: Ants:', this.data.Ant.length, 'Colonies:', this.data.Colony.length);
+    
+    // Save the filtered state to localStorage immediately
+    this.saveState();
+    
+    // Force a complete refresh by emitting empty arrays first
+    this.emit('Ant', []);
+    this.emit('Chamber', []);
+    this.emit('Colony', []);
+    this.emit('ExploredTerritory', []);
+    this.emit('DiscoveredResource', []);
+    
+    // Then emit the actual filtered data
+    setTimeout(() => {
+      this.emit('Ant', this.data.Ant);
+      this.emit('Chamber', this.data.Chamber);
+      this.emit('Colony', this.data.Colony);
+      this.emit('ExploredTerritory', this.data.ExploredTerritory);
+      this.emit('DiscoveredResource', this.data.DiscoveredResource);
+    }, 50);
+    
+    // Create new minimal colony with generation bonuses
+    const currentPlayer = this.data.Player.find(p => p.id === this.identity);
+    const generations = currentPlayer?.generations_survived || 0;
+    
+    // Bonus resources based on generations survived
+    const bonusJelly = Math.min(generations * 5, 50); // +5 jelly per generation, max 50
+    const bonusWater = Math.min(generations * 2, 20); // +2 water per generation, max 20
+    
+    // Apply trait bonuses
+    let baseJelly = 20;
+    let baseFood = 0;
+    let baseWater = 5;
+    let baseHealth = 200;
+    let baseLarvae = 0;
+    
+    if (trait) {
+      switch (trait) {
+        case AntTrait.Fertile:
+          baseLarvae = 1; // Start with 1 extra larva
+          break;
+        case AntTrait.Matriarch:
+          baseLarvae = 2; // Start with 2 extra larvae
+          break;
+        case AntTrait.Survivor:
+          baseJelly += 10; // +50% starting jelly
+          break;
+        default:
+          // Other traits don't affect starting resources
+          break;
+      }
+      
+      console.log(`Young queen with ${trait} trait starting new colony!`);
+    }
+    
     const colonyId = this.nextId.colony++;
     const colony = {
       id: colonyId,
       player_id: this.identity,
       queen_id: null,
-      food: 0,
+      food: baseFood,
+      water: baseWater + bonusWater,
       minerals: 0,
-      larvae: 0,
-      queen_jelly: 20, // Just enough for workers
+      larvae: baseLarvae,
+      queen_jelly: baseJelly + bonusJelly,
       population: 2,
       territory_radius: 30,
       created_at: Date.now(),
-      ai_enabled: false
+      ai_enabled: false,
+      queen_trait: trait
     };
+    
+    console.log(`Starting generation ${generations + 1} with ${colony.queen_jelly} jelly and ${colony.water} water`);
     
     this.data.Colony.push(colony);
     
-    // Create queen
+    // Create queen - starts on surface and will dig initial burrow
     const queenId = this.nextId.ant++;
     const queen = {
       id: queenId,
@@ -625,62 +1735,48 @@ export class MockSpacetimeService {
       ant_type: AntType.Queen,
       x,
       y,
-      z: -5,
-      health: 200,
-      max_health: 200,
+      z: 0, // Start on surface
+      health: baseHealth,
+      max_health: baseHealth,
       carrying_resource: null,
       carrying_amount: 0,
-      task: TaskType.Idle,
-      target_x: null,
-      target_y: null,
-      target_z: null,
+      task: TaskType.Building, // Queen starts digging
+      target_x: x,
+      target_y: y,
+      target_z: -5,
       speed: 1,
-      attack_damage: 0
+      attack_damage: 0,
+      jelly_consumption_rate: 0,
+      last_fed_at: Date.now(),
+      trait_type: trait,
+      dig_start_time: Date.now() // Track when digging started
     };
     
     this.data.Ant.push(queen);
     colony.queen_id = queenId;
     
-    // Create minimal throne room
-    const throneId = this.nextId.chamber++;
-    const throne = {
-      id: throneId,
-      colony_id: colonyId,
-      chamber_type: ChamberType.ThroneRoom,
-      x,
-      y,
-      z: -5,
-      level: 1,
-      capacity: 1
-    };
+    // Track the queen's digging start time
+    this.queenDigTracking.set(queenId, {
+      startTime: Date.now(),
+      x: x,
+      y: y,
+      colonyId: colonyId
+    });
     
-    this.data.Chamber.push(throne);
+    console.log(`Queen ${queenId} started digging at (${x}, ${y}). Task: ${queen.task}`);
     
-    // Create one worker
-    const workerId = this.nextId.ant++;
-    const worker = {
-      id: workerId,
-      colony_id: colonyId,
-      ant_type: AntType.Worker,
-      x: x + 5,
-      y: y + 5,
-      z: -5,
-      health: 50,
-      max_health: 50,
-      carrying_resource: null,
-      carrying_amount: 0,
-      task: TaskType.Idle,
-      target_x: null,
-      target_y: null,
-      target_z: null,
-      speed: 4,
-      attack_damage: 5
-    };
+    // Don't create burrow yet - queen will dig it
+    // We'll create it in the tick when digging completes
     
-    this.data.Ant.push(worker);
+    // Don't create worker yet - queen will lay first larva after digging
+    // Update population to just queen
+    colony.population = 1;
     
-    // Deduct worker cost
-    colony.queen_jelly = 18;
+    // Update player stats
+    const updatedPlayer = this.data.Player.find(p => p.id === this.identity);
+    if (updatedPlayer) {
+      updatedPlayer.total_colonies = (updatedPlayer.total_colonies || 0) + 1;
+    }
     
     // Emit all updates
     this.emit('Player', this.data.Player);
@@ -694,8 +1790,292 @@ export class MockSpacetimeService {
     let coloniesChanged = false;
     let resourcesChanged = false;
     
+    // First, clean up orphaned ants (ants without valid colonies)
+    const validColonyIds = this.data.Colony.map(c => c.id);
+    const orphanedAnts = this.data.Ant.filter(a => !validColonyIds.includes(a.colony_id));
+    if (orphanedAnts.length > 0) {
+      console.log(`Removing ${orphanedAnts.length} orphaned ants`);
+      this.data.Ant = this.data.Ant.filter(a => validColonyIds.includes(a.colony_id));
+      antsChanged = true;
+    }
+    
+    // Check for queens completing digging
+    const now = Date.now();
+    this.queenDigTracking.forEach((digInfo, queenId) => {
+      const queen = this.data.Ant.find(a => a.id === queenId);
+      if (!queen) {
+        this.queenDigTracking.delete(queenId);
+        return;
+      }
+      
+      const digDuration = 5000; // 5 seconds to dig initial burrow
+      if (now - digInfo.startTime >= digDuration) {
+        // Queen has finished digging!
+        console.group(`⛏️ Queen Digging Complete`);
+        console.log(`Queen ID: ${queenId}`);
+        console.log(`Location: (${digInfo.x}, ${digInfo.y})`);
+        console.log(`Burrow created at depth: -10 with entrance tunnel`);
+        console.groupEnd();
+        
+        // Create the surface entrance (marks the hole)
+        const entranceId = this.nextId.chamber++;
+        const entrance = {
+          id: entranceId,
+          colony_id: digInfo.colonyId,
+          chamber_type: ChamberType.Burrow,
+          x: digInfo.x,
+          y: digInfo.y,
+          z: -1, // Just below surface to mark entrance
+          level: 1,
+          capacity: 0, // Entrance doesn't provide capacity
+          is_entrance: true
+        };
+        
+        // Create the actual burrow chamber deeper underground
+        const burrowId = this.nextId.chamber++;
+        const burrow = {
+          id: burrowId,
+          colony_id: digInfo.colonyId,
+          chamber_type: ChamberType.Burrow,
+          x: digInfo.x,
+          y: digInfo.y,
+          z: -10, // Deeper underground
+          level: 1,
+          capacity: 10, // Provides 10 population points
+          larvae_count: 0,
+          larvae_capacity: 5 // Queen can only have 5 larvae at a time
+        };
+        
+        this.data.Chamber.push(entrance);
+        this.data.Chamber.push(burrow);
+        
+        // Create a tunnel connecting entrance to burrow
+        const tunnelId = this.nextId.tunnel++;
+        const tunnel = {
+          id: tunnelId,
+          colony_id: digInfo.colonyId,
+          start_x: digInfo.x,
+          start_y: digInfo.y,
+          start_z: -1,
+          end_x: digInfo.x,
+          end_y: digInfo.y,
+          end_z: -10
+        };
+        this.data.Tunnel.push(tunnel);
+        this.emit('Tunnel', this.data.Tunnel);
+        
+        // Move queen to the deep burrow chamber
+        queen.z = -10;
+        queen.task = TaskType.Idle;
+        queen.target_x = null;
+        queen.target_y = null;
+        queen.target_z = null;
+        
+        // Queen lays first larva and it automatically becomes a worker
+        const colony = this.data.Colony.find(c => c.id === digInfo.colonyId);
+        if (colony && colony.queen_jelly >= 2.5) { // Need jelly for larva + worker transformation
+          // Create first larva entity
+          const larvaId = this.nextId.larva++;
+          const larva = {
+            id: larvaId,
+            colony_id: digInfo.colonyId,
+            x: digInfo.x + (Math.random() - 0.5) * 20,
+            y: digInfo.y + (Math.random() - 0.5) * 20,
+            z: -10, // At chamber depth
+            age: 0,
+            created_at: Date.now()
+          };
+          
+          this.data.Larva.push(larva);
+          this.emit('Larva', this.data.Larva);
+          
+          colony.larvae += 1;
+          colony.queen_jelly -= 0.5;
+          coloniesChanged = true;
+          console.log(`Queen laid first larva. Automatically transforming to worker...`);
+          
+          // Automatically transform to worker after 2 seconds
+          setTimeout(() => {
+            if (colony.queen_jelly >= 2) {
+              // Remove larva
+              this.data.Larva = this.data.Larva.filter(l => l.id !== larvaId);
+              colony.larvae -= 1;
+              colony.queen_jelly -= 2;
+              
+              // Update chamber larvae count
+              if (burrow && burrow.larvae_count !== undefined && burrow.larvae_count > 0) {
+                burrow.larvae_count -= 1;
+                this.emit('Chamber', this.data.Chamber);
+              }
+              
+              // Create worker
+              const workerId = this.nextId.ant++;
+              const worker = {
+                id: workerId,
+                colony_id: digInfo.colonyId,
+                ant_type: AntType.Worker,
+                x: larva.x,
+                y: larva.y,
+                z: larva.z,
+                health: 50,
+                max_health: 50,
+                speed: 2.0,
+                task: TaskType.Idle,
+                target_x: null,
+                target_y: null,
+                target_z: null,
+                carrying_resource: null,
+                carrying_amount: 0
+              };
+              
+              this.data.Ant.push(worker);
+              colony.population += 1;
+              
+              console.log(`First worker created! Starting automatic resource gathering.`);
+              
+              // Set worker to gather automatically
+              setTimeout(() => {
+                this.setWorkerToGather(workerId);
+              }, 1000);
+              
+              this.emit('Ant', this.data.Ant);
+              this.emit('Colony', this.data.Colony);
+              this.emit('Larva', this.data.Larva);
+            }
+          }, 2000);
+        }
+        
+        // Clean up tracking
+        this.queenDigTracking.delete(queenId);
+        antsChanged = true;
+        
+        // Auto-discover nearby surface resources for initial colony
+        const nearbyResources = this.data.ResourceNode.filter(r => {
+          const dist = Math.sqrt(
+            Math.pow(r.x - digInfo.x, 2) + 
+            Math.pow(r.y - digInfo.y, 2)
+          );
+          return dist < 150 && r.z === 0; // Surface resources within 150 units
+        });
+        
+        nearbyResources.slice(0, 3).forEach(resource => { // Discover up to 3 nearby resources
+          const alreadyDiscovered = this.data.DiscoveredResource.some(dr => 
+            dr.colony_id === digInfo.colonyId && dr.resource_id === resource.id
+          );
+          
+          if (!alreadyDiscovered) {
+            this.data.DiscoveredResource.push({
+              id: this.nextId.discovered++,
+              colony_id: digInfo.colonyId,
+              resource_id: resource.id,
+              discovered_at: Date.now()
+            });
+            console.log(`🔍 Auto-discovered ${resource.resource_type} resource at (${resource.x}, ${resource.y}) for new colony`);
+          }
+        });
+        
+        this.emit('DiscoveredResource', this.data.DiscoveredResource);
+      }
+    });
+    
+    // Check for queens completing egg laying
+    const layingQueens = this.data.Ant.filter(a => 
+      a.ant_type === AntType.Queen && (a as any).laying_start_time
+    );
+    
+    layingQueens.forEach(queen => {
+      const layDuration = 3000; // 3 seconds to lay an egg
+      if (now - (queen as any).laying_start_time >= layDuration) {
+        // Queen has finished laying!
+        const colony = this.data.Colony.find(c => c.id === queen.colony_id);
+        if (colony) {
+          // Create larva entity at a random position in the chamber
+          const larvaId = this.nextId.larva++;
+          const offsetX = (Math.random() - 0.5) * 20;
+          const offsetY = (Math.random() - 0.5) * 20;
+          
+          const larva = {
+            id: larvaId,
+            colony_id: queen.colony_id,
+            x: queen.x + offsetX,
+            y: queen.y + offsetY,
+            z: queen.z,
+            age: 0,
+            created_at: Date.now()
+          };
+          
+          this.data.Larva.push(larva);
+          colony.larvae += 1;
+          
+          // Update chamber count
+          const chamber = this.data.Chamber.find(ch => 
+            ch.colony_id === colony.id && 
+            Math.abs(ch.x - queen.x) < 30 && 
+            Math.abs(ch.y - queen.y) < 30 && 
+            ch.z === queen.z
+          );
+          
+          if (chamber && chamber.larvae_count !== undefined) {
+            chamber.larvae_count += 1;
+            this.emit('Chamber', this.data.Chamber);
+          }
+          
+          console.log(`Queen laid an egg! Colony now has ${colony.larvae} larvae`);
+          coloniesChanged = true;
+        }
+        
+        // Reset queen state
+        delete (queen as any).laying_start_time;
+        queen.task = TaskType.Idle;
+        antsChanged = true;
+        
+        this.emit('Larva', this.data.Larva);
+      }
+    });
+    
+    // Check for mature young queens
+    const youngQueens = this.data.Ant.filter(a => a.ant_type === AntType.YoungQueen);
+    youngQueens.forEach(queen => {
+      if (queen.maturation_time && now >= queen.maturation_time) {
+        // Time to fly!
+        console.log(`Young queen ${queen.id} has matured and is flying away!`);
+        this.nuptialFlight(queen.id);
+      }
+    });
+    
     // Update ant movements
     this.data.Ant.forEach(ant => {
+      // Check if wounded ant should retreat
+      if ((ant as any).wounded && ant.health < ant.max_health * 0.3 && ant.z === 0) {
+        // Find nearest burrow entrance to retreat to
+        const burrowEntrance = this.data.Chamber.find(ch => 
+          ch.colony_id === ant.colony_id && 
+          ch.z === -1 && 
+          ch.is_entrance
+        );
+        
+        if (burrowEntrance && ant.task !== TaskType.Entering) {
+          console.log(`🏃 Wounded ant ${ant.id} retreating to burrow!`);
+          ant.task = TaskType.Entering;
+          ant.target_x = burrowEntrance.x;
+          ant.target_y = burrowEntrance.y;
+          ant.target_z = burrowEntrance.z;
+        }
+      }
+      
+      // Heal wounded ants slowly when underground
+      if ((ant as any).wounded && ant.z < 0 && Math.random() < 0.05) {
+        ant.health = Math.min(ant.max_health, ant.health + 5);
+        if (ant.health === ant.max_health) {
+          delete (ant as any).wounded;
+          delete (ant as any).wounded_at;
+          // Restore normal speed
+          ant.speed = this.getAntStats(ant.ant_type).speed;
+          console.log(`💚 Ant ${ant.id} fully healed!`);
+        }
+        antsChanged = true;
+      }
+      
       if (ant.target_x !== null && ant.target_y !== null && ant.target_z !== null) {
         const dx = ant.target_x - ant.x;
         const dy = ant.target_y - ant.y;
@@ -718,8 +2098,206 @@ export class MockSpacetimeService {
           ant.target_y = null;
           ant.target_z = null;
           
+          // Handle entering burrow
+          if (ant.task === TaskType.Entering) {
+            // Teleport to underground entrance
+            ant.z = -10; // Move to underground level
+            console.log(`🚪 Ant ${ant.id} entered burrow underground`);
+            
+            // Now go underground to final destination
+            const finalX = (ant as any).final_target_x;
+            const finalY = (ant as any).final_target_y;
+            const finalZ = (ant as any).final_target_z;
+            const finalTask = (ant as any).final_task;
+            
+            if (finalX !== undefined && finalY !== undefined && finalZ !== undefined) {
+              ant.target_x = finalX;
+              ant.target_y = finalY;
+              ant.target_z = finalZ;
+              ant.task = finalTask || TaskType.Idle;
+              
+              // Clear temporary data
+              delete (ant as any).final_target_x;
+              delete (ant as any).final_target_y;
+              delete (ant as any).final_target_z;
+              delete (ant as any).final_task;
+            } else {
+              ant.task = TaskType.Idle;
+            }
+            antsChanged = true;
+          }
+          // Handle exiting burrow
+          else if (ant.task === TaskType.Exiting) {
+            // Check if we're at the burrow entrance (should be at z=-1)
+            const burrowEntrance = this.data.Chamber.find(ch => 
+              ch.colony_id === ant.colony_id && 
+              ch.chamber_type === ChamberType.Burrow &&
+              ch.is_entrance === true
+            );
+            
+            if (burrowEntrance) {
+              // First move to entrance if not there yet
+              if (Math.abs(ant.z - burrowEntrance.z) > 0.5) {
+                console.log(`🚶 Ant ${ant.id} moving to burrow entrance at z=${burrowEntrance.z}`);
+                ant.target_x = burrowEntrance.x;
+                ant.target_y = burrowEntrance.y;
+                ant.target_z = burrowEntrance.z;
+              } else {
+                // Now at entrance, teleport to surface
+                ant.z = 0; // Move to surface
+                console.log(`🚪 Ant ${ant.id} exited burrow to surface`);
+                
+                // Now go to surface final destination
+                const finalX = (ant as any).final_target_x;
+                const finalY = (ant as any).final_target_y;
+                const finalZ = (ant as any).final_target_z;
+                const finalTask = (ant as any).final_task;
+                
+                if (finalX !== undefined && finalY !== undefined && finalZ !== undefined) {
+                  ant.target_x = finalX;
+                  ant.target_y = finalY;
+                  ant.target_z = finalZ;
+                  ant.task = finalTask || TaskType.Idle;
+                  
+                  // Clear temporary data
+                  delete (ant as any).final_target_x;
+                  delete (ant as any).final_target_y;
+                  delete (ant as any).final_target_z;
+                  delete (ant as any).final_task;
+                } else {
+                  ant.task = TaskType.Idle;
+                }
+              }
+            } else {
+              console.log(`⚠️ No burrow entrance found for ant ${ant.id} to exit!`);
+              ant.task = TaskType.Idle;
+            }
+            antsChanged = true;
+          }
+          // Handle digging
+          else if (ant.task === TaskType.Digging && ant.ant_type === AntType.Worker) {
+            const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+            if (colony && ant.z < -5) { // Must be underground to dig
+              // Generate resources from digging
+              const waterFound = Math.random() * 2; // 0-2 water per dig
+              const mineralsFound = Math.random() * 3; // 0-3 minerals per dig
+              
+              colony.water += waterFound;
+              colony.minerals += mineralsFound;
+              coloniesChanged = true;
+              
+              console.log(`Worker ${ant.id} found ${waterFound.toFixed(1)} water and ${mineralsFound.toFixed(1)} minerals while digging`);
+              
+              // Set ant to return with materials
+              ant.carrying_resource = Math.random() > 0.5 ? ResourceType.Water : ResourceType.Minerals;
+              ant.carrying_amount = Math.random() > 0.5 ? waterFound : mineralsFound;
+              ant.task = TaskType.Returning;
+              
+              // Set target to colony throne room or burrow
+              const chambers = this.data.Chamber.filter(ch => ch.colony_id === colony.id);
+              const throne = chambers.find(ch => ch.chamber_type === ChamberType.ThroneRoom);
+              const burrow = chambers.find(ch => ch.chamber_type === ChamberType.Burrow);
+              const target = throne || burrow;
+              
+              if (target) {
+                ant.target_x = target.x;
+                ant.target_y = target.y;
+                ant.target_z = target.z;
+              }
+            } else if (ant.z >= -5) {
+              // Not underground, need to go down first
+              ant.target_z = -15;
+              ant.target_x = ant.x;
+              ant.target_y = ant.y;
+            }
+          }
+          // Check if near prey (for soldiers)
+          else if ((ant.ant_type === AntType.Soldier || ant.ant_type === AntType.Major) && ant.z === 0) {
+            const nearbyPrey = this.data.Prey.find(p => {
+              const dist = Math.sqrt(
+                Math.pow(p.x - ant.x, 2) +
+                Math.pow(p.y - ant.y, 2)
+              );
+              return dist < 10;
+            });
+            
+            if (nearbyPrey) {
+              ant.task = TaskType.Fighting;
+              
+              // Check if this is a group hunt target
+              const isGroupHunt = (nearbyPrey as any).group_hunt_target;
+              const otherHunters = this.data.Ant.filter(a => 
+                a.id !== ant.id && 
+                (a as any).hunt_target_id === nearbyPrey.id &&
+                Math.sqrt(Math.pow(a.x - nearbyPrey.x, 2) + Math.pow(a.y - nearbyPrey.y, 2)) < 15
+              );
+              
+              // Calculate damage based on group size
+              let damage = ant.attack_damage;
+              if (isGroupHunt && otherHunters.length > 0) {
+                // Group bonus: +20% damage per additional ant
+                damage = Math.floor(damage * (1 + 0.2 * otherHunters.length));
+                
+                // Check if prey is pinned (surrounded)
+                const isPinned = otherHunters.length >= ((nearbyPrey as any).required_hunters || 2) - 1;
+                if (isPinned) {
+                  damage *= 1.5; // 50% damage bonus when pinned
+                  (nearbyPrey as any).pinned = true;
+                  console.log(`🎯 Prey is pinned by ${otherHunters.length + 1} ants!`);
+                }
+              }
+              
+              // Apply damage
+              nearbyPrey.health -= damage;
+              
+              // Chance of ant getting wounded in combat
+              if (Math.random() < 0.1) { // 10% chance per attack
+                const woundDamage = Math.floor(nearbyPrey.attack_damage * 0.5);
+                ant.health = Math.max(1, ant.health - woundDamage);
+                (ant as any).wounded = true;
+                (ant as any).wounded_at = Date.now();
+                console.log(`⚠️ Ant ${ant.id} was wounded! Health: ${ant.health}/${ant.max_health}`);
+                
+                // Wounded ants move slower
+                ant.speed = ant.speed * 0.5;
+              }
+              
+              if (nearbyPrey.health <= 0) {
+                // Convert to food resource
+                const foodValue = nearbyPrey.food_value * (isGroupHunt ? 1.5 : 1); // Bonus food for group hunts
+                const foodId = this.nextId.ant++;
+                this.data.ResourceNode.push({
+                  id: foodId,
+                  resource_type: ResourceType.Food,
+                  x: nearbyPrey.x,
+                  y: nearbyPrey.y,
+                  z: 0,
+                  amount: Math.floor(foodValue),
+                  max_amount: Math.floor(foodValue),
+                  regeneration_rate: 0
+                });
+                
+                // Remove prey
+                this.data.Prey = this.data.Prey.filter(p => p.id !== nearbyPrey.id);
+                preyChanged = true;
+                resourcesChanged = true;
+                
+                const hunters = otherHunters.length + 1;
+                console.log(`🏆 ${hunters} ant(s) killed ${nearbyPrey.prey_type}! Food value: ${foodValue}`);
+                
+                // Clear hunt target from all ants
+                this.data.Ant.forEach(a => {
+                  if ((a as any).hunt_target_id === nearbyPrey.id) {
+                    delete (a as any).hunt_target_id;
+                    a.task = TaskType.Idle;
+                  }
+                });
+              }
+              antsChanged = true;
+            }
+          }
           // Check if near resource
-          if (ant.ant_type === AntType.Worker && !ant.carrying_resource) {
+          else if (ant.ant_type === AntType.Worker && !ant.carrying_resource) {
             const nearbyResource = this.data.ResourceNode.find(r => {
               const dist = Math.sqrt(
                 Math.pow(r.x - ant.x, 2) +
@@ -737,45 +2315,68 @@ export class MockSpacetimeService {
               ant.carrying_amount = gatherAmount;
               ant.task = TaskType.Returning;
               
-              // Set target to colony throne room
+              // Set target to storage chamber, or burrow if no storage exists
               const colony = this.data.Colony.find(c => c.id === ant.colony_id);
               if (colony) {
-                const throne = this.data.Chamber.find(ch => 
-                  ch.colony_id === colony.id && 
-                  ch.chamber_type === ChamberType.ThroneRoom
-                );
-                if (throne) {
-                  ant.target_x = throne.x;
-                  ant.target_y = throne.y;
-                  ant.target_z = throne.z;
+                const chambers = this.data.Chamber.filter(ch => ch.colony_id === colony.id);
+                const storage = chambers.find(ch => ch.chamber_type === ChamberType.Storage);
+                const burrow = chambers.find(ch => ch.chamber_type === ChamberType.Burrow);
+                const target = storage || burrow;
+                
+                if (target) {
+                  // If on surface and target is underground, need to enter burrow first
+                  if (ant.z >= -5 && target.z < -5) {
+                    const surfaceBurrow = chambers.find(ch => ch.chamber_type === ChamberType.Burrow);
+                    if (surfaceBurrow) {
+                      ant.target_x = surfaceBurrow.x;
+                      ant.target_y = surfaceBurrow.y;
+                      ant.target_z = 0;
+                      ant.task = TaskType.Entering;
+                      
+                      (ant as any).final_target_x = target.x;
+                      (ant as any).final_target_y = target.y;
+                      (ant as any).final_target_z = target.z;
+                      (ant as any).final_task = TaskType.Depositing;
+                    }
+                  } else {
+                    ant.target_x = target.x;
+                    ant.target_y = target.y;
+                    ant.target_z = target.z;
+                    ant.task = TaskType.Depositing;
+                  }
                 }
               }
               
               resourcesChanged = true;
               antsChanged = true;
             }
-          } else if (ant.carrying_resource && ant.task === TaskType.Returning) {
-            // Check if at colony
+          } else if (ant.carrying_resource && (ant.task === TaskType.Returning || ant.task === TaskType.Depositing)) {
+            // Check if at storage location
             const colony = this.data.Colony.find(c => c.id === ant.colony_id);
             if (colony) {
-              const throne = this.data.Chamber.find(ch => 
-                ch.colony_id === colony.id && 
-                ch.chamber_type === ChamberType.ThroneRoom
-              );
-              if (throne) {
+              const chambers = this.data.Chamber.filter(ch => ch.colony_id === colony.id);
+              const storage = chambers.find(ch => ch.chamber_type === ChamberType.Storage);
+              const burrow = chambers.find(ch => ch.chamber_type === ChamberType.Burrow);
+              const depositLocation = storage || burrow;
+              
+              if (depositLocation) {
                 const dist = Math.sqrt(
-                  Math.pow(throne.x - ant.x, 2) +
-                  Math.pow(throne.y - ant.y, 2) +
-                  Math.pow(throne.z - ant.z, 2)
+                  Math.pow(depositLocation.x - ant.x, 2) +
+                  Math.pow(depositLocation.y - ant.y, 2) +
+                  Math.pow(depositLocation.z - ant.z, 2)
                 );
                 
                 if (dist < 10) {
                   // Deposit resources
                   if (ant.carrying_resource === ResourceType.Food) {
                     colony.food += ant.carrying_amount;
+                  } else if (ant.carrying_resource === ResourceType.Water) {
+                    colony.water += ant.carrying_amount;
                   } else if (ant.carrying_resource === ResourceType.Minerals) {
                     colony.minerals += ant.carrying_amount;
                   }
+                  
+                  console.log(`Worker ${ant.id} deposited ${ant.carrying_amount} ${ant.carrying_resource} at ${depositLocation.chamber_type}`);
                   
                   ant.carrying_resource = null;
                   ant.carrying_amount = 0;
@@ -789,6 +2390,42 @@ export class MockSpacetimeService {
             ant.task = TaskType.Idle;
             antsChanged = true;
           }
+        }
+      }
+      
+      // Scout discovery
+      if (ant.ant_type === AntType.Scout) {
+        const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+        if (colony) {
+          // Find nearby resources within scout vision (50 units)
+          const scoutVision = 50;
+          this.data.ResourceNode.forEach(resource => {
+            const dist = Math.sqrt(
+              Math.pow(resource.x - ant.x, 2) +
+              Math.pow(resource.y - ant.y, 2) +
+              Math.pow(resource.z - ant.z, 2)
+            );
+            
+            if (dist <= scoutVision) {
+              // Check if already discovered
+              const alreadyDiscovered = this.data.DiscoveredResource.some(dr => 
+                dr.colony_id === colony.id && dr.resource_id === resource.id
+              );
+              
+              if (!alreadyDiscovered) {
+                const discoveredId = this.nextId.discovered++;
+                const discovered = {
+                  id: discoveredId,
+                  colony_id: colony.id,
+                  resource_id: resource.id,
+                  discovered_at: Date.now()
+                };
+                this.data.DiscoveredResource.push(discovered);
+                console.log(`Colony ${colony.id} discovered resource ${resource.id} at (${resource.x}, ${resource.y})`);
+                this.emit('DiscoveredResource', this.data.DiscoveredResource);
+              }
+            }
+          });
         }
       }
     });
@@ -806,16 +2443,32 @@ export class MockSpacetimeService {
     
     // Update colonies
     this.data.Colony.forEach(colony => {
-      // Generate larvae
-      const nurseries = this.data.Chamber.filter(ch => 
-        ch.colony_id === colony.id && 
-        ch.chamber_type === ChamberType.Nursery
-      ).length;
-      
-      if (Math.random() < 0.01 * (1 + nurseries)) {
-        colony.larvae++;
+      // Sync larvae count with actual larvae entities
+      const actualLarvae = this.data.Larva.filter(l => l.colony_id === colony.id).length;
+      if (colony.larvae !== actualLarvae) {
+        console.log(`🔄 Syncing larvae count for colony ${colony.id}: ${colony.larvae} -> ${actualLarvae}`);
+        colony.larvae = actualLarvae;
         coloniesChanged = true;
       }
+      
+      // Also sync chamber larvae counts
+      const chambers = this.data.Chamber.filter(ch => ch.colony_id === colony.id);
+      chambers.forEach(chamber => {
+        if (chamber.larvae_count !== undefined) {
+          const larvaeInChamber = this.data.Larva.filter(l => 
+            l.colony_id === colony.id &&
+            Math.abs(l.x - chamber.x) < 30 &&
+            Math.abs(l.y - chamber.y) < 30 &&
+            l.z === chamber.z
+          ).length;
+          
+          if (chamber.larvae_count !== larvaeInChamber) {
+            console.log(`🏠 Syncing chamber larvae: ${chamber.larvae_count} -> ${larvaeInChamber}`);
+            chamber.larvae_count = larvaeInChamber;
+            this.emit('Chamber', this.data.Chamber);
+          }
+        }
+      });
       
       // Deplete queen jelly over time
       if (colony.queen_jelly > 0) {
@@ -823,66 +2476,286 @@ export class MockSpacetimeService {
         coloniesChanged = true;
       }
       
-      // AI behavior
-      if (colony.ai_enabled && Math.random() < 0.1) { // 10% chance per tick
-        // Find colony's ants
-        const colonyAnts = this.data.Ant.filter(a => a.colony_id === colony.id);
-        const workers = colonyAnts.filter(a => a.ant_type === AntType.Worker);
-        const scouts = colonyAnts.filter(a => a.ant_type === AntType.Scout);
-        const idleWorkers = workers.filter(a => a.task === TaskType.Idle);
+      // Enhanced Colony AI - Always active for automated gameplay
+      colony.ai_enabled = true;
+      
+      const colonyAnts = this.data.Ant.filter(a => a.colony_id === colony.id);
+      const workers = colonyAnts.filter(a => a.ant_type === AntType.Worker);
+      const scouts = colonyAnts.filter(a => a.ant_type === AntType.Scout);
+      const soldiers = colonyAnts.filter(a => a.ant_type === AntType.Soldier);
+      const royalWorkers = colonyAnts.filter(a => a.ant_type === AntType.RoyalWorker);
+      const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
+      
+      // Target composition: 2 workers, 1 scout, 2 soldiers, then expand
+      const targetWorkers = 2;
+      const targetScouts = 1;
+      const targetSoldiers = 2;
+      
+      // Phase 1: Build basic colony
+      if (queen && colony.larvae > 0 && colony.queen_jelly >= 2) {
+        let spawned = false;
         
-        // Critical: Queen jelly running low
-        if (colony.queen_jelly < 20 && idleWorkers.length > 0) {
-          // Send all idle workers to nearest food
-          const foodNodes = this.data.ResourceNode.filter(r => 
-            r.resource_type === ResourceType.Food && r.amount > 0
-          );
+        // First priority: Workers for resource gathering
+        if (workers.length < targetWorkers) {
+          this.feedLarva(colony.id, AntType.Worker, 
+            queen.x + (Math.random() - 0.5) * 20,
+            queen.y + (Math.random() - 0.5) * 20, 
+            queen.z);
+          console.log(`🐜 Colony building: Worker ${workers.length + 1}/${targetWorkers}`);
+          spawned = true;
+        }
+        // Second priority: Scout for exploration
+        else if (scouts.length < targetScouts && colony.queen_jelly >= 2.5) {
+          this.feedLarva(colony.id, AntType.Scout, 
+            queen.x + (Math.random() - 0.5) * 20,
+            queen.y + (Math.random() - 0.5) * 20, 
+            queen.z);
+          console.log(`🔍 Colony building: Scout ${scouts.length + 1}/${targetScouts}`);
+          spawned = true;
+        }
+        // Third priority: Soldiers for defense
+        else if (soldiers.length < targetSoldiers && colony.queen_jelly >= 3) {
+          this.feedLarva(colony.id, AntType.Soldier, 
+            queen.x + (Math.random() - 0.5) * 20,
+            queen.y + (Math.random() - 0.5) * 20, 
+            queen.z);
+          console.log(`⚔️ Colony building: Soldier ${soldiers.length + 1}/${targetSoldiers}`);
+          spawned = true;
+        }
+        // After basic composition, add royal worker
+        else if (workers.length >= targetWorkers && royalWorkers.length === 0 && colony.queen_jelly >= 5) {
+          this.feedLarva(colony.id, AntType.RoyalWorker, queen.x, queen.y, queen.z);
+          console.log(`👑 Colony building: Royal Worker for jelly production`);
+          spawned = true;
+        }
+      }
+      
+      // Queen continues laying eggs
+      if (queen && colony.queen_jelly >= 0.5 && Math.random() < 0.05) {
+        // Find the queen's chamber
+        const queenChamber = this.data.Chamber.find(ch => 
+          ch.colony_id === colony.id && 
+          Math.abs(ch.x - queen.x) < 30 && 
+          Math.abs(ch.y - queen.y) < 30 && 
+          ch.z === queen.z
+        );
+        
+        if (queenChamber) {
+          // Check chamber's larvae capacity
+          const currentLarvaeCount = queenChamber.larvae_count || 0;
+          const larvaeCapacity = queenChamber.larvae_capacity || 5;
           
-          if (foodNodes.length > 0) {
-            const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
-            if (queen) {
-              const nearestFood = foodNodes.sort((a, b) => {
-                const distA = Math.sqrt(Math.pow(a.x - queen.x, 2) + Math.pow(a.y - queen.y, 2));
-                const distB = Math.sqrt(Math.pow(b.x - queen.x, 2) + Math.pow(b.y - queen.y, 2));
-                return distA - distB;
-              })[0];
+          if (currentLarvaeCount < larvaeCapacity) {
+            this.spawnLarva(queen.id);
+          } else {
+            console.log(`🏠 Queen's chamber is full: ${currentLarvaeCount}/${larvaeCapacity} larvae`);
+          }
+        }
+      }
+      
+      // Royal workers produce jelly automatically
+      royalWorkers.forEach(royal => {
+        if (colony.food >= 5 && colony.minerals >= 2 && Math.random() < 0.1) {
+          colony.food -= 5;
+          colony.minerals -= 2;
+          colony.queen_jelly += 5;
+          coloniesChanged = true;
+          console.log(`🍯 Royal worker produced queen jelly (total: ${colony.queen_jelly.toFixed(1)})`);
+        }
+      });
+      
+      // Worker AI - Automatic resource gathering
+      workers.forEach(worker => {
+        if (worker.task === TaskType.Idle && Math.random() < 0.3) {
+          this.setWorkerToGather(worker.id);
+        }
+      });
+      
+      // Scout AI - Exploration and threat detection
+      scouts.forEach(scout => {
+        if (scout.task === TaskType.Idle && Math.random() < 0.2) {
+          // Explore in expanding circles around colony
+          const angle = Math.random() * Math.PI * 2;
+          const distance = 50 + Math.random() * 150;
+          const targetX = queen ? queen.x + Math.cos(angle) * distance : scout.x + Math.cos(angle) * distance;
+          const targetY = queen ? queen.y + Math.sin(angle) * distance : scout.y + Math.sin(angle) * distance;
+          
+          this.commandAnts([scout.id], targetX, targetY, 0, 'scout');
+        }
+        
+        // Threat detection when on surface
+        if (scout.z === 0) {
+          // Detect predators
+          const threats = this.data.Predator.filter(pred => {
+            const dist = Math.sqrt(Math.pow(pred.x - scout.x, 2) + Math.pow(pred.y - scout.y, 2));
+            return dist < 100;
+          });
+          
+          if (threats.length > 0 && Math.random() < 0.5) {
+            console.log(`⚠️ Scout detected ${threats.length} predators!`);
+            // Mark area as dangerous
+            threats.forEach(threat => {
+              (threat as any).detected_by_scout = true;
+              (threat as any).detected_at = Date.now();
+            });
+          }
+          
+          // Detect large prey for group hunting
+          const largePrey = this.data.Prey.filter(prey => {
+            const dist = Math.sqrt(Math.pow(prey.x - scout.x, 2) + Math.pow(prey.y - scout.y, 2));
+            return dist < 80 && prey.health > 50;
+          });
+          
+          if (largePrey.length > 0 && soldiers.length >= 2) {
+            const target = largePrey[0];
+            console.log(`🎯 Scout found large prey! Sending soldiers for group hunt.`);
+            
+            // Send multiple soldiers to hunt large prey
+            const availableSoldiers = soldiers.filter(s => s.task === TaskType.Idle && s.z === 0);
+            if (availableSoldiers.length >= 2) {
+              // Mark prey as group hunt target
+              (target as any).group_hunt_target = true;
+              (target as any).required_hunters = Math.ceil(target.health / 30); // Need more ants for bigger prey
               
-              idleWorkers.forEach(worker => {
-                worker.target_x = nearestFood.x;
-                worker.target_y = nearestFood.y;
-                worker.target_z = nearestFood.z;
-                worker.task = TaskType.Exploring;
+              // Send soldiers
+              availableSoldiers.slice(0, Math.min(3, availableSoldiers.length)).forEach(soldier => {
+                soldier.task = TaskType.Fighting;
+                soldier.target_x = target.x;
+                soldier.target_y = target.y;
+                soldier.target_z = 0;
+                (soldier as any).hunt_target_id = target.id;
+                console.log(`⚔️ Soldier ${soldier.id} joining group hunt`);
               });
               antsChanged = true;
             }
+            
+            // Send available soldiers
+            soldiers.filter(s => s.task === TaskType.Idle).forEach(soldier => {
+              this.commandAnts([soldier.id], target.x, target.y, target.z, 'hunt');
+            });
           }
         }
-        
-        // Convert food to queen jelly if needed
-        if (colony.queen_jelly < 50 && colony.food >= 20) {
-          colony.food -= 10;
-          colony.queen_jelly += 5;
-          coloniesChanged = true;
-        }
-        
-        // Spawn scouts if needed
-        if (scouts.length < 2 && colony.food >= 15 && colony.larvae >= 1 && colony.queen_jelly >= 2.5) {
-          const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
-          if (queen) {
-            this.spawnAnt(colony.id, AntType.Scout, queen.x + 10, queen.y + 10, queen.z);
+      });
+      
+      // Emergency jelly production
+      if (colony.queen_jelly < 10 && colony.food >= 20) {
+        colony.food -= 10;
+        colony.queen_jelly += 5;
+        coloniesChanged = true;
+        console.log(`⚠️ Emergency jelly production! (${colony.queen_jelly.toFixed(1)} jelly)`);
+      }
+    });
+    
+    // Update prey movement
+    let preyChanged = false;
+    this.data.Prey.forEach(prey => {
+      // Check for nearby ants
+      let closestAnt: any = null;
+      let closestDistance = Infinity;
+      
+      this.data.Ant.forEach(ant => {
+        if (ant.z === 0) { // Only surface ants
+          const dist = Math.sqrt(
+            Math.pow(ant.x - prey.x, 2) + 
+            Math.pow(ant.y - prey.y, 2)
+          );
+          if (dist < prey.flee_distance && dist < closestDistance) {
+            closestDistance = dist;
+            closestAnt = ant;
           }
         }
+      });
+      
+      // Flee from ants
+      if (closestAnt) {
+        const dx = prey.x - closestAnt.x;
+        const dy = prey.y - closestAnt.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
         
-        // Replace dead workers
-        if (workers.length < 5 && colony.food >= 10 && colony.larvae >= 1 && colony.queen_jelly >= 2) {
-          const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
-          if (queen) {
-            this.spawnAnt(colony.id, AntType.Worker, queen.x + 5, queen.y + 5, queen.z);
-          }
+        if (dist > 0) {
+          prey.x += (dx / dist) * prey.speed;
+          prey.y += (dy / dist) * prey.speed;
+          preyChanged = true;
+        }
+      } else {
+        // Random movement when not fleeing
+        if (Math.random() < 0.1) {
+          prey.x += (Math.random() - 0.5) * prey.speed * 2;
+          prey.y += (Math.random() - 0.5) * prey.speed * 2;
+          preyChanged = true;
         }
       }
     });
     
+    // Update predator behavior
+    let predatorChanged = false;
+    this.data.Predator.forEach(predator => {
+      // Find closest ant to hunt
+      let targetAnt: any = null;
+      let closestDistance = predator.hunt_radius;
+      
+      this.data.Ant.forEach(ant => {
+        if (ant.z === 0) { // Only hunt surface ants
+          const dist = Math.sqrt(
+            Math.pow(ant.x - predator.x, 2) + 
+            Math.pow(ant.y - predator.y, 2)
+          );
+          if (dist < closestDistance) {
+            closestDistance = dist;
+            targetAnt = ant;
+          }
+        }
+      });
+      
+      if (targetAnt) {
+        predator.target_ant_id = targetAnt.id;
+        
+        // Move towards target
+        const dx = targetAnt.x - predator.x;
+        const dy = targetAnt.y - predator.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist > 5) {
+          predator.x += (dx / dist) * predator.speed;
+          predator.y += (dy / dist) * predator.speed;
+          predatorChanged = true;
+        } else {
+          // Attack!
+          const damage = predator.attack_damage;
+          targetAnt.health -= damage;
+          
+          // Mark ant as wounded
+          if (targetAnt.health > 0) {
+            (targetAnt as any).wounded = true;
+            (targetAnt as any).wounded_at = Date.now();
+            targetAnt.speed = targetAnt.speed * 0.5; // Slow down wounded ant
+            console.log(`🕷️ Predator attacks ant ${targetAnt.id}! Health: ${targetAnt.health}/${targetAnt.max_health}`);
+          }
+          
+          if (targetAnt.health <= 0) {
+            // Remove dead ant
+            this.data.Ant = this.data.Ant.filter(a => a.id !== targetAnt.id);
+            const colony = this.data.Colony.find(c => c.id === targetAnt.colony_id);
+            if (colony) {
+              colony.population--;
+              coloniesChanged = true;
+            }
+            predator.target_ant_id = null;
+            console.log(`💀 Predator killed ant ${targetAnt.id}`);
+            antsChanged = true;
+          }
+        }
+      } else {
+        predator.target_ant_id = null;
+        // Random patrol
+        if (Math.random() < 0.05) {
+          predator.x += (Math.random() - 0.5) * predator.speed * 3;
+          predator.y += (Math.random() - 0.5) * predator.speed * 3;
+          predatorChanged = true;
+        }
+      }
+    });
+
     // Emit updates
     if (antsChanged) this.emit('Ant', this.data.Ant);
     if (coloniesChanged) {
@@ -890,6 +2763,77 @@ export class MockSpacetimeService {
       this.saveState();
     }
     if (resourcesChanged) this.emit('ResourceNode', this.data.ResourceNode);
+    if (preyChanged) this.emit('Prey', this.data.Prey);
+    if (predatorChanged) this.emit('Predator', this.data.Predator);
+  }
+
+  private cleanupDeadData() {
+    console.log('🧹 Cleaning up dead colonies and orphaned ants...');
+    
+    // Get active colony IDs
+    const activeColonyIds = new Set(this.data.Colony.map(c => c.id));
+    
+    // Also check for colonies without queens and mark them for removal
+    const coloniesWithQueens = new Set<number>();
+    this.data.Colony.forEach(colony => {
+      if (colony.queen_id) {
+        // Check if the queen actually exists
+        const queenExists = this.data.Ant.some(ant => ant.id === colony.queen_id);
+        if (queenExists) {
+          coloniesWithQueens.add(colony.id);
+        }
+      }
+    });
+    
+    // Remove colonies without queens
+    const beforeColonyCount = this.data.Colony.length;
+    this.data.Colony = this.data.Colony.filter(colony => coloniesWithQueens.has(colony.id));
+    const removedColonies = beforeColonyCount - this.data.Colony.length;
+    
+    // Update active colony IDs after removing dead colonies
+    const finalActiveColonyIds = new Set(this.data.Colony.map(c => c.id));
+    
+    // Log remaining colonies
+    console.log(`📊 Active colonies after queen check: ${this.data.Colony.length}`);
+    this.data.Colony.forEach(colony => {
+      const antCount = this.data.Ant.filter(ant => ant.colony_id === colony.id).length;
+      console.log(`   Colony #${colony.id}: ${antCount} ants, Player: ${colony.player_id}`);
+    });
+    
+    // Remove ants from dead colonies
+    const beforeAntCount = this.data.Ant.length;
+    this.data.Ant = this.data.Ant.filter(ant => finalActiveColonyIds.has(ant.colony_id));
+    const removedAnts = beforeAntCount - this.data.Ant.length;
+    
+    // Remove chambers from dead colonies
+    const beforeChamberCount = this.data.Chamber.length;
+    this.data.Chamber = this.data.Chamber.filter(chamber => finalActiveColonyIds.has(chamber.colony_id));
+    const removedChambers = beforeChamberCount - this.data.Chamber.length;
+    
+    // Remove larvae from dead colonies
+    const beforeLarvaeCount = this.data.Larva.length;
+    this.data.Larva = this.data.Larva.filter(larva => finalActiveColonyIds.has(larva.colony_id));
+    const removedLarvae = beforeLarvaeCount - this.data.Larva.length;
+    
+    // Remove explored territories from dead colonies
+    const beforeExploredCount = this.data.ExploredTerritory.length;
+    this.data.ExploredTerritory = this.data.ExploredTerritory.filter(
+      territory => finalActiveColonyIds.has(territory.colony_id)
+    );
+    const removedExplored = beforeExploredCount - this.data.ExploredTerritory.length;
+    
+    // Remove discovered resources from dead colonies
+    const beforeDiscoveredCount = this.data.DiscoveredResource.length;
+    this.data.DiscoveredResource = this.data.DiscoveredResource.filter(
+      resource => finalActiveColonyIds.has(resource.colony_id)
+    );
+    const removedDiscovered = beforeDiscoveredCount - this.data.DiscoveredResource.length;
+    
+    if (removedColonies > 0 || removedAnts > 0 || removedChambers > 0 || removedLarvae > 0) {
+      console.log(`✅ Cleaned up: ${removedColonies} dead colonies, ${removedAnts} ants, ${removedChambers} chambers, ${removedLarvae} larvae`);
+      console.log(`   Also removed: ${removedExplored} territories, ${removedDiscovered} discovered resources`);
+      console.log(`   Remaining: ${finalActiveColonyIds.size} active colonies with ${this.data.Ant.length} total ants`);
+    }
   }
 
   private saveState() {
@@ -905,14 +2849,112 @@ export class MockSpacetimeService {
     if (saved) {
       try {
         const state = JSON.parse(saved);
-        this.data = state.data;
+        
+        // Load world data (resources, obstacles, etc)
+        this.data.ResourceNode = state.data.ResourceNode || [];
+        this.data.Obstacle = state.data.Obstacle || [];
+        this.data.Prey = state.data.Prey || [];
+        this.data.Predator = state.data.Predator || [];
+        
+        // Only load player-specific data for the current identity
+        this.data.Player = (state.data.Player || []).filter((p: any) => p.id === this.identity);
+        this.data.Colony = (state.data.Colony || []).filter((c: any) => c.player_id === this.identity);
+        
+        // Get colonies belonging to this player
+        const myColonyIds = this.data.Colony.map((c: any) => c.id);
+        
+        // Only load entities belonging to player's colonies
+        this.data.Ant = (state.data.Ant || []).filter((a: any) => myColonyIds.includes(a.colony_id));
+        this.data.Chamber = (state.data.Chamber || []).filter((ch: any) => myColonyIds.includes(ch.colony_id));
+        this.data.ExploredTerritory = (state.data.ExploredTerritory || []).filter((et: any) => myColonyIds.includes(et.colony_id));
+        this.data.DiscoveredResource = (state.data.DiscoveredResource || []).filter((dr: any) => myColonyIds.includes(dr.colony_id));
+        
+        // Load other shared data
+        this.data.Tunnel = state.data.Tunnel || [];
+        this.data.Pheromone = state.data.Pheromone || [];
+        this.data.Battle = state.data.Battle || [];
+        
         this.nextId = state.nextId;
+        
+        console.log(`Loaded state for player ${this.identity}: ${this.data.Colony.length} colonies, ${this.data.Ant.length} ants`);
       } catch (e) {
         console.error('Failed to load state:', e);
       }
     }
   }
 
+  private getJellyConsumptionRate(antType: AntType): number {
+    // Jelly consumed per minute
+    switch (antType) {
+      case AntType.Queen: return 0; // Queens don't consume jelly
+      case AntType.YoungQueen: return 0.1; // Young queens consume some jelly
+      case AntType.Worker: return 0.1;
+      case AntType.RoyalWorker: return 0.05; // Less consumption, produces jelly
+      case AntType.Soldier: return 0.15;
+      case AntType.Scout: return 0.08;
+      case AntType.Major: return 0.2;
+      default: return 0.1;
+    }
+  }
+  
+  private getUnitPopulationCost(antType: AntType): number {
+    // Population points required for each unit type
+    switch (antType) {
+      case AntType.Queen: return 0; // Queens don't count towards population
+      case AntType.Worker: return 1;
+      case AntType.Scout: return 1;
+      case AntType.Soldier: return 2;
+      case AntType.RoyalWorker: return 5;
+      case AntType.Major: return 5;
+      case AntType.YoungQueen: return 10;
+      default: return 1;
+    }
+  }
+  
+  public calculateColonyCapacity(colonyId: number): number {
+    let capacity = 0;
+    
+    // Add capacity from chambers
+    const chambers = this.data.Chamber.filter(ch => ch.colony_id === colonyId);
+    chambers.forEach(chamber => {
+      switch (chamber.chamber_type) {
+        case ChamberType.Burrow:
+          capacity += 10; // Each burrow provides 10 population points
+          break;
+        case ChamberType.Barracks:
+          capacity += 20; // Each barracks adds 20 population points
+          break;
+        case ChamberType.Nursery:
+          capacity += 5; // Nurseries add small capacity
+          break;
+        case ChamberType.Storage:
+          capacity += 5; // Storage adds small capacity
+          break;
+      }
+    });
+    
+    return capacity;
+  }
+  
+  public calculateColonyPopulation(colonyId: number): number {
+    // Calculate current population usage
+    const ants = this.data.Ant.filter(a => a.colony_id === colonyId);
+    let populationUsed = 0;
+    
+    ants.forEach(ant => {
+      populationUsed += this.getUnitPopulationCost(ant.ant_type);
+    });
+    
+    return populationUsed;
+  }
+  
+  private hasRoyalChamber(colonyId: number): boolean {
+    // Check if colony has a throne room (royal chamber)
+    return this.data.Chamber.some(ch => 
+      ch.colony_id === colonyId && ch.chamber_type === ChamberType.ThroneRoom
+    );
+  }
+  
   disconnect() {
     if (this.gameUpdateInterval) {
       clearInterval(this.gameUpdateInterval);
