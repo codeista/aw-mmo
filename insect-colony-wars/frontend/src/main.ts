@@ -146,6 +146,8 @@ class UndergroundViewport {
     });
 
     this.canvas.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const rect = this.canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left - this.canvas.width / 2) / this.zoom + this.cameraX;
       const y = (e.clientY - rect.top - this.canvas.height / 2) / this.zoom + this.cameraY;
@@ -154,6 +156,7 @@ class UndergroundViewport {
 
     this.canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       const rect = this.canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left - this.canvas.width / 2) / this.zoom + this.cameraX;
       const y = (e.clientY - rect.top - this.canvas.height / 2) / this.zoom + this.cameraY;
@@ -506,7 +509,8 @@ class InsectColonyWarsGame {
           <div id="unitList"></div>
           <div style="margin-top: 10px; font-size: 11px; color: #666;">
             ESC: Clear • Ctrl+A: Select All<br>
-            Click: Select • Shift+Click: Add
+            Click: Select • Shift+Click: Add<br>
+            Double-click group: Select type
           </div>
         </div>
         
@@ -719,6 +723,9 @@ class InsectColonyWarsGame {
   }
 
   handleMapClick(x: number, y: number, isRightClick: boolean) {
+    // Don't handle clicks if in placement mode
+    if (this.placementMode) return;
+    
     if (this.huntMode && isRightClick) {
       // Send hunting party to location
       this.service.call('hive_command_hunt', {
@@ -740,8 +747,8 @@ class InsectColonyWarsGame {
         target_y: y,
         target_z: this.viewport.cameraZ
       });
-    } else {
-      // Select ants at this position
+    } else if (!isRightClick) {
+      // Left click - select ants at this position
       const clickRadius = 20;
       const clickedAnts: number[] = [];
       
@@ -849,17 +856,17 @@ class InsectColonyWarsGame {
         const group = (e.currentTarget as HTMLElement).parentElement!;
         const wasExpanded = group.classList.contains('expanded');
         
-        // Toggle expansion
+        // Always toggle expansion
         group.classList.toggle('expanded');
         
-        // Only select all if we're expanding
-        if (!wasExpanded) {
+        // Double click to select all of this type
+        if (e.detail === 2) {
           const type = group.dataset.type as AntType;
           const ants = antsByType.get(type) || [];
           if (ants.length > 0) {
             this.selectedAntIds = ants.map(a => a.id);
             this.viewport.selectAnts(this.selectedAntIds);
-            this.updateUI();
+            setTimeout(() => this.updateUI(), 0);
           }
         }
       });
@@ -881,14 +888,15 @@ class InsectColonyWarsGame {
             this.selectedAntIds.push(antId);
           }
         } else {
-          // Single selection
+          // Single selection - clear others first
           this.selectedAntIds = [antId];
           // Focus camera on ant
           this.viewport.focusOnPosition(ant.x, ant.y, ant.z);
         }
         
         this.viewport.selectAnts(this.selectedAntIds);
-        this.updateUI();
+        // Update UI immediately to reflect selection
+        setTimeout(() => this.updateUI(), 0);
       });
     });
   }

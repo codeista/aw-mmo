@@ -268,11 +268,18 @@ body {
 
 .unit-item:hover {
   background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .unit-item.selected {
   background: rgba(76, 175, 80, 0.3);
   border: 1px solid #4CAF50;
+  box-shadow: 0 0 5px rgba(76, 175, 80, 0.5);
+}
+
+.unit-item.selected:hover {
+  background: rgba(76, 175, 80, 0.4);
+  border-color: #66BB6A;
 }
 
 .unit-health {
