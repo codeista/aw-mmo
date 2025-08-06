@@ -5,7 +5,9 @@ use spacetimedb::{spacetimedb, Identity, ReducerContext};
 #[derive(SpacetimeType, Debug, Clone, Copy, PartialEq)]
 pub enum AntType {
     Queen,
+    YoungQueen, // Can fly away to start new colony
     Worker,
+    RoyalWorker, // Produces queen jelly, never leaves burrow
     Soldier,
     Scout,
     Major,
@@ -14,6 +16,7 @@ pub enum AntType {
 #[derive(SpacetimeType, Debug, Clone, Copy, PartialEq)]
 pub enum ResourceType {
     Food,
+    Water,
     Minerals,
     Larvae,
 }
@@ -24,6 +27,7 @@ pub enum ChamberType {
     Storage,
     Barracks,
     ThroneRoom,
+    Burrow, // Resource outpost
 }
 
 #[derive(SpacetimeType, Debug, Clone, Copy, PartialEq)]
@@ -34,6 +38,35 @@ pub enum TaskType {
     Fighting,
     Exploring,
     Returning,
+    Digging,
+}
+
+#[derive(SpacetimeType, Debug, Clone, Copy, PartialEq)]
+pub enum AntTrait {
+    // Combat traits
+    AcidSpray,    // +50% damage, damage over time
+    Venomous,     // Attacks slow enemies
+    Armored,      // +25% health, -10% speed
+    
+    // Movement traits  
+    Swift,        // +50% movement speed
+    Climber,      // Can traverse obstacles
+    Tunneler,     // +50% digging speed
+    
+    // Work traits
+    Strong,       // +50% carrying capacity
+    Efficient,    // -25% jelly consumption
+    Industrious,  // +25% work speed
+    
+    // Special traits
+    Pheromone,    // Mimics colony scent, tricks enemy scouts/defenders
+    Regenerator,  // Slowly heals over time
+    Scout,        // +50% vision range
+    
+    // Queen-specific traits (for young queens)
+    Fertile,      // +50% larvae production
+    Matriarch,    // Colony starts with bonus population
+    Survivor,     // Start with +50% extra jelly
 }
 
 // ===== TABLES =====
@@ -47,6 +80,9 @@ pub struct Player {
     pub created_at: u64,
     pub total_colonies: u32,
     pub resources_gathered: u64,
+    pub generations_survived: u32,
+    pub queens_produced: u32,
+    pub best_colony_score: u64,
 }
 
 /// Colony owned by a player
@@ -58,6 +94,7 @@ pub struct Colony {
     pub player_id: Identity,
     pub queen_id: Option<u32>, // Reference to queen ant
     pub food: f32,
+    pub water: f32,
     pub minerals: f32,
     pub larvae: u32,
     pub queen_jelly: f32, // Queen's life force
@@ -65,6 +102,7 @@ pub struct Colony {
     pub territory_radius: f32,
     pub created_at: u64,
     pub ai_enabled: bool, // Auto-management toggle
+    pub queen_trait: Option<AntTrait>, // Inherited from founding queen
 }
 
 /// Individual ant unit
@@ -88,6 +126,10 @@ pub struct Ant {
     pub target_z: Option<f32>,
     pub speed: f32,
     pub attack_damage: u32,
+    pub jelly_consumption_rate: f32, // Jelly consumed per tick
+    pub last_fed_at: u64, // Timestamp of last feeding
+    pub trait_type: Option<AntTrait>, // Not for RoyalWorker or base Queen
+    pub maturation_time: Option<u64>, // For YoungQueen: timestamp when they can fly
 }
 
 /// Underground tunnel network
@@ -182,16 +224,123 @@ pub struct ExploredTerritory {
     pub threat_level: u32,
 }
 
+/// Discovered resource nodes per colony
+#[spacetimedb(table)]
+pub struct DiscoveredResource {
+    #[primary_key]
+    #[autoinc]
+    pub id: u32,
+    pub colony_id: u32,
+    pub resource_id: u32,
+    pub discovered_at: u64,
+}
+
+/// Surface obstacles (rocks, plants, logs)
+#[spacetimedb(table)]
+pub struct Obstacle {
+    #[primary_key]
+    #[autoinc]
+    pub id: u32,
+    pub obstacle_type: String, // "rock", "plant", "log", "leaf"
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub blocks_movement: bool,
+}
+
+/// Prey animals that ants can hunt
+#[spacetimedb(table)]
+pub struct Prey {
+    #[primary_key]
+    #[autoinc]
+    pub id: u32,
+    pub prey_type: String, // "aphid", "caterpillar", "termite"
+    pub x: f32,
+    pub y: f32,
+    pub health: u32,
+    pub max_health: u32,
+    pub speed: f32,
+    pub food_value: f32,
+    pub flee_distance: f32,
+}
+
+/// Predators that hunt ants
+#[spacetimedb(table)]
+pub struct Predator {
+    #[primary_key]
+    #[autoinc]
+    pub id: u32,
+    pub predator_type: String, // "spider", "bird", "beetle"
+    pub x: f32,
+    pub y: f32,
+    pub health: u32,
+    pub max_health: u32,
+    pub speed: f32,
+    pub attack_damage: u32,
+    pub hunt_radius: f32,
+    pub target_ant_id: Option<u32>,
+}
+
 // ===== HELPER FUNCTIONS =====
 
 fn get_ant_stats(ant_type: AntType) -> (u32, f32, u32) {
     // Returns (max_health, speed, attack_damage)
     match ant_type {
-        AntType::Queen => (200, 1.0, 0),
+        AntType::Queen => (200, 0.5, 50), // Very slow but powerful bite for defense
+        AntType::YoungQueen => (150, 4.0, 15), // Can fly! Fast and can defend herself
         AntType::Worker => (50, 4.0, 5),
+        AntType::RoyalWorker => (40, 0.5, 0), // Slow, no attack, stays in burrow
         AntType::Soldier => (100, 3.0, 20),
         AntType::Scout => (30, 6.0, 10),
         AntType::Major => (150, 2.0, 30),
+    }
+}
+
+fn generate_random_trait_for_type(ant_type: AntType) -> Option<AntTrait> {
+    // No traits for RoyalWorker or base Queen
+    if ant_type == AntType::RoyalWorker || ant_type == AntType::Queen {
+        return None;
+    }
+    
+    let timestamp = spacetimedb::timestamp();
+    let random = (timestamp % 100) as u32;
+    
+    // Different trait pools for different ant types
+    match ant_type {
+        AntType::YoungQueen => {
+            match random % 3 {
+                0 => Some(AntTrait::Fertile),
+                1 => Some(AntTrait::Matriarch),
+                _ => Some(AntTrait::Survivor),
+            }
+        },
+        AntType::Worker => {
+            match random % 5 {
+                0 => Some(AntTrait::Strong),
+                1 => Some(AntTrait::Swift),
+                2 => Some(AntTrait::Efficient),
+                3 => Some(AntTrait::Industrious),
+                _ => Some(AntTrait::Pheromone),
+            }
+        },
+        AntType::Soldier | AntType::Major => {
+            match random % 4 {
+                0 => Some(AntTrait::AcidSpray),
+                1 => Some(AntTrait::Venomous),
+                2 => Some(AntTrait::Armored),
+                _ => Some(AntTrait::Regenerator),
+            }
+        },
+        AntType::Scout => {
+            match random % 4 {
+                0 => Some(AntTrait::Swift),
+                1 => Some(AntTrait::Scout),
+                2 => Some(AntTrait::Climber),
+                _ => Some(AntTrait::Pheromone),
+            }
+        },
+        _ => None,
     }
 }
 
@@ -199,20 +348,37 @@ fn distance_3d(x1: f32, y1: f32, z1: f32, x2: f32, y2: f32, z2: f32) -> f32 {
     ((x2 - x1).powi(2) + (y2 - y1).powi(2) + (z2 - z1).powi(2)).sqrt()
 }
 
+fn get_jelly_consumption_rate(ant_type: AntType) -> f32 {
+    // Jelly consumed per minute
+    match ant_type {
+        AntType::Queen => 0.0, // Queens don't consume jelly
+        AntType::YoungQueen => 0.1, // Consumes jelly while preparing to fly
+        AntType::Worker => 0.1,
+        AntType::RoyalWorker => 0.05, // Less consumption, produces jelly
+        AntType::Soldier => 0.15,
+        AntType::Scout => 0.08,
+        AntType::Major => 0.2,
+    }
+}
+
 fn can_afford_ant(colony: &Colony, ant_type: AntType) -> bool {
     let jelly_cost = match ant_type {
         AntType::Worker => 2.0,
+        AntType::RoyalWorker => 5.0, // More expensive, produces jelly
         AntType::Soldier => 3.0,
         AntType::Scout => 2.5,
         AntType::Major => 5.0,
+        AntType::YoungQueen => 50.0, // Very expensive
         AntType::Queen => 999.0, // Can't spawn queens
     };
     
     colony.queen_jelly >= jelly_cost && match ant_type {
         AntType::Worker => colony.food >= 10.0 && colony.larvae >= 1,
+        AntType::RoyalWorker => colony.food >= 20.0 && colony.larvae >= 1,
         AntType::Soldier => colony.food >= 20.0 && colony.larvae >= 1,
         AntType::Scout => colony.food >= 15.0 && colony.larvae >= 1,
         AntType::Major => colony.food >= 50.0 && colony.minerals >= 10.0 && colony.larvae >= 2,
+        AntType::YoungQueen => colony.food >= 50.0 && colony.water >= 20.0 && colony.larvae >= 1,
         AntType::Queen => false,
     }
 }
@@ -269,6 +435,7 @@ pub fn respawn_as_queen(ctx: ReducerContext, x: f32, y: f32) {
         player_id: ctx.sender,
         queen_id: None,
         food: 0.0, // Start with nothing
+        water: 10.0, // Minimal water
         minerals: 0.0,
         larvae: 0, // No larvae
         queen_jelly: 20.0, // Just enough to spawn 1 worker
@@ -276,6 +443,7 @@ pub fn respawn_as_queen(ctx: ReducerContext, x: f32, y: f32) {
         territory_radius: 30.0, // Smaller territory
         created_at: spacetimedb::timestamp(),
         ai_enabled: false, // Manual control for survival
+        queen_trait: None, // Regular respawn has no trait
     };
     let colony_id = Colony::insert(colony).unwrap().id;
     
@@ -298,6 +466,10 @@ pub fn respawn_as_queen(ctx: ReducerContext, x: f32, y: f32) {
         target_z: None,
         speed,
         attack_damage: damage,
+        jelly_consumption_rate: get_jelly_consumption_rate(AntType::Queen),
+        last_fed_at: spacetimedb::timestamp(),
+        trait_type: None, // Regular queens don't have traits
+        maturation_time: None,
     };
     let queen_id = Ant::insert(queen).unwrap().id;
     
@@ -338,6 +510,10 @@ pub fn respawn_as_queen(ctx: ReducerContext, x: f32, y: f32) {
         target_z: None,
         speed: worker_speed,
         attack_damage: worker_damage,
+        jelly_consumption_rate: get_jelly_consumption_rate(AntType::Worker),
+        last_fed_at: spacetimedb::timestamp(),
+        trait_type: generate_random_trait_for_type(AntType::Worker),
+        maturation_time: None,
     };
     Ant::insert(worker);
     
@@ -372,6 +548,7 @@ pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
         player_id: ctx.sender,
         queen_id: None,
         food: 100.0,
+        water: 50.0, // Starting water
         minerals: 0.0,
         larvae: 5,
         queen_jelly: 100.0, // Starting queen jelly
@@ -379,6 +556,7 @@ pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
         territory_radius: 50.0,
         created_at: spacetimedb::timestamp(),
         ai_enabled: true, // AI enabled by default
+        queen_trait: None, // Will be set if queen has trait
     };
     let colony_id = Colony::insert(colony).unwrap().id;
     
@@ -401,6 +579,10 @@ pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
         target_z: None,
         speed,
         attack_damage: damage,
+        jelly_consumption_rate: get_jelly_consumption_rate(AntType::Queen),
+        last_fed_at: spacetimedb::timestamp(),
+        trait_type: None, // Regular queens don't have traits
+        maturation_time: None,
     };
     let queen_id = Ant::insert(queen).unwrap().id;
     
@@ -442,6 +624,9 @@ pub fn create_colony(ctx: ReducerContext, x: f32, y: f32) {
             target_z: None,
             speed,
             attack_damage: damage,
+            jelly_consumption_rate: get_jelly_consumption_rate(AntType::Worker),
+            last_fed_at: spacetimedb::timestamp(),
+            trait_type: generate_random_trait_for_type(AntType::Worker),
         };
         Ant::insert(worker);
     }
@@ -477,14 +662,15 @@ pub fn spawn_ant(ctx: ReducerContext, colony_id: u32, ant_type: AntType, x: f32,
         return;
     }
     
-    // Deduct resources
-    let jelly_cost = match ant_type {
-        AntType::Worker => 2.0,
-        AntType::Soldier => 3.0,
-        AntType::Scout => 2.5,
-        AntType::Major => 5.0,
-        AntType::Queen => return, // Can't spawn queens
-    };
+    // Only workers can spawn other ant types from larvae
+    if ant_type != AntType::Worker {
+        log::error!("Use feed_larva to transform larvae into other ant types");
+        return;
+    }
+    
+    // First larva is always a worker (costs less)
+    let is_first_worker = colony.population == 1; // Only queen exists
+    let jelly_cost = if is_first_worker { 1.0 } else { 2.0 };
     
     colony.queen_jelly -= jelly_cost;
     
@@ -528,6 +714,10 @@ pub fn spawn_ant(ctx: ReducerContext, colony_id: u32, ant_type: AntType, x: f32,
         target_z: None,
         speed,
         attack_damage: damage,
+        jelly_consumption_rate: get_jelly_consumption_rate(ant_type),
+        last_fed_at: spacetimedb::timestamp(),
+        trait_type: generate_random_trait_for_type(ant_type),
+        maturation_time: None,
     };
     Ant::insert(ant);
     
@@ -541,8 +731,12 @@ pub fn spawn_ant(ctx: ReducerContext, colony_id: u32, ant_type: AntType, x: f32,
 /// Command ants to move to a location
 #[spacetimedb(reducer)]
 pub fn command_ants(ctx: ReducerContext, ant_ids: Vec<u32>, target_x: f32, target_y: f32, target_z: f32) {
-    for ant_id in ant_ids {
-        let mut ant = match Ant::filter_by_id(&ant_id) {
+    // First check total jelly cost
+    let mut total_jelly_cost = 0.0;
+    let mut valid_ants = Vec::new();
+    
+    for ant_id in &ant_ids {
+        let ant = match Ant::filter_by_id(ant_id) {
             Some(a) => a,
             None => continue,
         };
@@ -553,13 +747,41 @@ pub fn command_ants(ctx: ReducerContext, ant_ids: Vec<u32>, target_x: f32, targe
             continue;
         }
         
-        // Set movement target
-        ant.target_x = Some(target_x);
-        ant.target_y = Some(target_y);
-        ant.target_z = Some(target_z);
-        ant.task = TaskType::Exploring;
+        // Calculate distance and jelly cost (0.01 jelly per unit distance)
+        let distance = distance_3d(ant.x, ant.y, ant.z, target_x, target_y, target_z);
+        let jelly_cost = distance * 0.01;
+        total_jelly_cost += jelly_cost;
         
-        Ant::update_by_id(&ant_id, ant);
+        valid_ants.push((ant_id, ant.colony_id, jelly_cost));
+    }
+    
+    // Check if colony has enough jelly
+    if let Some((_, colony_id, _)) = valid_ants.first() {
+        let mut colony = Colony::filter_by_id(colony_id).unwrap();
+        if colony.queen_jelly < total_jelly_cost {
+            log::warn!("Not enough queen jelly for movement. Need {}, have {}", total_jelly_cost, colony.queen_jelly);
+            return;
+        }
+        
+        // Deduct jelly and move ants
+        colony.queen_jelly -= total_jelly_cost;
+        Colony::update_by_id(colony_id, colony);
+        
+        // Update ant positions
+        for ant_id in ant_ids {
+            let mut ant = match Ant::filter_by_id(&ant_id) {
+                Some(a) => a,
+                None => continue,
+            };
+            
+            // Set movement target
+            ant.target_x = Some(target_x);
+            ant.target_y = Some(target_y);
+            ant.target_z = Some(target_z);
+            ant.task = TaskType::Exploring;
+            
+            Ant::update_by_id(&ant_id, ant);
+        }
     }
 }
 
@@ -611,14 +833,23 @@ pub fn dig_tunnel(ctx: ReducerContext, colony_id: u32, start_x: f32, start_y: f3
     log::info!("Tunnel created for colony {}", colony_id);
 }
 
-/// Build a chamber
+/// Build a chamber (workers build chambers, queens only build burrows)
 #[spacetimedb(reducer)]
-pub fn build_chamber(ctx: ReducerContext, colony_id: u32, chamber_type: ChamberType, x: f32, y: f32, z: f32) {
+pub fn build_chamber(ctx: ReducerContext, ant_id: u32, chamber_type: ChamberType, x: f32, y: f32, z: f32) {
+    // Get the ant that's building
+    let ant = match Ant::filter_by_id(&ant_id) {
+        Some(a) => a,
+        None => {
+            log::error!("Ant not found: {}", ant_id);
+            return;
+        }
+    };
+    
     // Verify colony ownership
-    let mut colony = match Colony::filter_by_id(&colony_id) {
+    let mut colony = match Colony::filter_by_id(&ant.colony_id) {
         Some(c) => c,
         None => {
-            log::error!("Colony not found: {}", colony_id);
+            log::error!("Colony not found: {}", ant.colony_id);
             return;
         }
     };
@@ -628,15 +859,36 @@ pub fn build_chamber(ctx: ReducerContext, colony_id: u32, chamber_type: ChamberT
         return;
     }
     
+    // Check ant permissions
+    match ant.ant_type {
+        AntType::Queen => {
+            if chamber_type != ChamberType::Burrow {
+                log::error!("Queens can only build burrows");
+                return;
+            }
+        }
+        AntType::Worker => {
+            if chamber_type == ChamberType::Burrow {
+                log::error!("Workers cannot build burrows, only queens can");
+                return;
+            }
+        }
+        _ => {
+            log::error!("Only queens and workers can build");
+            return;
+        }
+    }
+    
     // Check resources for chamber
-    let (food_cost, mineral_cost) = match chamber_type {
-        ChamberType::Nursery => (50.0, 10.0),
-        ChamberType::Storage => (30.0, 20.0),
-        ChamberType::Barracks => (100.0, 50.0),
-        ChamberType::ThroneRoom => (200.0, 100.0),
+    let (food_cost, mineral_cost, jelly_cost) = match chamber_type {
+        ChamberType::Nursery => (50.0, 10.0, 0.0),
+        ChamberType::Storage => (30.0, 20.0, 0.0),
+        ChamberType::Barracks => (100.0, 50.0, 0.0),
+        ChamberType::ThroneRoom => (200.0, 100.0, 0.0),
+        ChamberType::Burrow => (20.0, 5.0, 10.0), // Burrows cost jelly to establish
     };
     
-    if colony.food < food_cost || colony.minerals < mineral_cost {
+    if colony.food < food_cost || colony.minerals < mineral_cost || colony.queen_jelly < jelly_cost {
         log::error!("Insufficient resources for chamber");
         return;
     }
@@ -644,6 +896,7 @@ pub fn build_chamber(ctx: ReducerContext, colony_id: u32, chamber_type: ChamberT
     // Deduct resources
     colony.food -= food_cost;
     colony.minerals -= mineral_cost;
+    colony.queen_jelly -= jelly_cost;
     Colony::update_by_id(&colony_id, colony);
     
     // Create chamber
@@ -665,6 +918,181 @@ pub fn build_chamber(ctx: ReducerContext, colony_id: u32, chamber_type: ChamberT
     Chamber::insert(chamber);
     
     log::info!("Chamber {:?} built for colony {}", chamber_type, colony_id);
+}
+
+/// Queen spawns a larva (queens can only make larvae and burrows)
+#[spacetimedb(reducer)]
+pub fn spawn_larva(ctx: ReducerContext, queen_id: u32) {
+    let queen = match Ant::filter_by_id(&queen_id) {
+        Some(q) => q,
+        None => {
+            log::error!("Queen not found: {}", queen_id);
+            return;
+        }
+    };
+    
+    if queen.ant_type != AntType::Queen {
+        log::error!("Only queens can spawn larvae");
+        return;
+    }
+    
+    let mut colony = Colony::filter_by_id(&queen.colony_id).unwrap();
+    if colony.player_id != ctx.sender {
+        log::error!("Queen not owned by player");
+        return;
+    }
+    
+    // Check if queen has energy (jelly) to produce larva
+    if colony.queen_jelly < 0.5 {
+        log::error!("Not enough queen jelly to spawn larva");
+        return;
+    }
+    
+    // Spawn larva (costs minimal jelly)
+    colony.queen_jelly -= 0.5;
+    colony.larvae += 1;
+    Colony::update_by_id(&colony.id, colony);
+    
+    log::info!("Queen {} spawned a larva", queen_id);
+}
+
+/// Feed a larva to transform it into an ant type
+#[spacetimedb(reducer)]
+pub fn feed_larva(ctx: ReducerContext, colony_id: u32, ant_type: AntType, x: f32, y: f32, z: f32) {
+    let mut colony = match Colony::filter_by_id(&colony_id) {
+        Some(c) => c,
+        None => {
+            log::error!("Colony not found: {}", colony_id);
+            return;
+        }
+    };
+    
+    if colony.player_id != ctx.sender {
+        log::error!("Colony not owned by player");
+        return;
+    }
+    
+    if colony.larvae < 1 {
+        log::error!("No larvae available");
+        return;
+    }
+    
+    // Calculate jelly cost for transformation
+    let jelly_cost = match ant_type {
+        AntType::Worker => 2.0,
+        AntType::RoyalWorker => 5.0,
+        AntType::Soldier => 3.0,
+        AntType::Scout => 2.5,
+        AntType::Major => 5.0,
+        AntType::YoungQueen => 50.0,
+        AntType::Queen => {
+            log::error!("Cannot transform larva into queen");
+            return;
+        }
+    };
+    
+    if colony.queen_jelly < jelly_cost {
+        log::error!("Not enough queen jelly to transform larva");
+        return;
+    }
+    
+    // Special handling for first worker
+    let is_first_worker = colony.population == 1 && ant_type == AntType::Worker;
+    if is_first_worker {
+        // First worker costs only 1 jelly
+        colony.queen_jelly -= 1.0;
+    } else {
+        colony.queen_jelly -= jelly_cost;
+    }
+    
+    colony.larvae -= 1;
+    
+    // Create the ant
+    let (health, speed, damage) = get_ant_stats(ant_type);
+    let current_time = spacetimedb::timestamp();
+    
+    // Set maturation time for young queens (5 minutes from now)
+    let maturation_time = if ant_type == AntType::YoungQueen {
+        Some(current_time + 300_000) // 5 minutes in milliseconds
+    } else {
+        None
+    };
+    
+    let ant = Ant {
+        id: 0, // autoinc
+        colony_id,
+        ant_type,
+        x,
+        y,
+        z,
+        health,
+        max_health: health,
+        carrying_resource: None,
+        carrying_amount: 0.0,
+        task: TaskType::Idle,
+        target_x: None,
+        target_y: None,
+        target_z: None,
+        speed,
+        attack_damage: damage,
+        jelly_consumption_rate: get_jelly_consumption_rate(ant_type),
+        last_fed_at: current_time,
+        trait_type: generate_random_trait_for_type(ant_type),
+        maturation_time,
+    };
+    Ant::insert(ant);
+    
+    colony.population += 1;
+    Colony::update_by_id(&colony_id, colony);
+    
+    log::info!("Larva transformed into {:?}", ant_type);
+}
+
+/// Royal workers produce queen jelly
+#[spacetimedb(reducer)]
+pub fn produce_jelly(ctx: ReducerContext, ant_id: u32) {
+    let ant = match Ant::filter_by_id(&ant_id) {
+        Some(a) => a,
+        None => {
+            log::error!("Ant not found: {}", ant_id);
+            return;
+        }
+    };
+    
+    if ant.ant_type != AntType::RoyalWorker {
+        log::error!("Only royal workers can produce jelly");
+        return;
+    }
+    
+    let mut colony = Colony::filter_by_id(&ant.colony_id).unwrap();
+    if colony.player_id != ctx.sender {
+        log::error!("Ant not owned by player");
+        return;
+    }
+    
+    // Check if in burrow
+    let in_burrow = Chamber::iter()
+        .any(|ch| ch.colony_id == colony.id && 
+             ch.chamber_type == ChamberType::Burrow &&
+             distance_3d(ant.x, ant.y, ant.z, ch.x, ch.y, ch.z) < 10.0);
+    
+    if !in_burrow {
+        log::error!("Royal workers must be in a burrow to produce jelly");
+        return;
+    }
+    
+    // Check if has food to convert
+    if colony.food < 5.0 {
+        log::error!("Not enough food to convert to jelly");
+        return;
+    }
+    
+    // Convert food to jelly
+    colony.food -= 5.0;
+    colony.queen_jelly += 2.5; // 50% conversion rate
+    Colony::update_by_id(&colony.id, colony);
+    
+    log::info!("Royal worker {} produced jelly", ant_id);
 }
 
 /// Deposit resources at storage
@@ -829,6 +1257,70 @@ pub fn toggle_colony_ai(ctx: ReducerContext, colony_id: u32) {
     log::info!("Colony {} AI toggled to: {}", colony_id, colony.ai_enabled);
 }
 
+/// Discover resources when scout explores
+#[spacetimedb(reducer)]
+pub fn discover_resources(ctx: ReducerContext, ant_id: u32) {
+    let ant = match Ant::filter_by_id(&ant_id) {
+        Some(a) => a,
+        None => {
+            log::error!("Ant not found: {}", ant_id);
+            return;
+        }
+    };
+    
+    // Verify ownership
+    let colony = Colony::filter_by_id(&ant.colony_id).unwrap();
+    if colony.player_id != ctx.sender {
+        log::error!("Ant not owned by player");
+        return;
+    }
+    
+    // Only scouts can discover resources
+    if ant.ant_type != AntType::Scout {
+        log::error!("Only scouts can discover resources");
+        return;
+    }
+    
+    // Find nearby resources within scout vision range (50 units)
+    let scout_vision = 50.0;
+    for resource in ResourceNode::iter() {
+        let distance = distance_3d(ant.x, ant.y, ant.z, resource.x, resource.y, resource.z);
+        if distance <= scout_vision {
+            // Check if already discovered
+            let already_discovered = DiscoveredResource::iter()
+                .any(|dr| dr.colony_id == colony.id && dr.resource_id == resource.id);
+            
+            if !already_discovered {
+                let discovered = DiscoveredResource {
+                    id: 0, // autoinc
+                    colony_id: colony.id,
+                    resource_id: resource.id,
+                    discovered_at: spacetimedb::timestamp(),
+                };
+                DiscoveredResource::insert(discovered);
+                
+                log::info!("Colony {} discovered resource {} at ({}, {}, {})", 
+                    colony.id, resource.id, resource.x, resource.y, resource.z);
+            }
+        }
+    }
+    
+    // Mark territory as explored
+    let explored = ExploredTerritory {
+        id: 0, // autoinc
+        colony_id: colony.id,
+        x: ant.x,
+        y: ant.y,
+        z: ant.z,
+        discovered_at: spacetimedb::timestamp(),
+        has_resources: ResourceNode::iter()
+            .any(|r| distance_3d(ant.x, ant.y, ant.z, r.x, r.y, r.z) <= scout_vision),
+        has_threats: false, // TODO: Check for enemy ants
+        threat_level: 0,
+    };
+    ExploredTerritory::insert(explored);
+}
+
 /// Hive mind command: All units gather resources
 #[spacetimedb(reducer)]
 pub fn hive_command_gather(ctx: ReducerContext, colony_id: u32) {
@@ -973,6 +1465,28 @@ pub fn hive_command_hunt(ctx: ReducerContext, colony_id: u32, target_x: f32, tar
 /// AI decision making - called periodically by the system
 #[spacetimedb(reducer)]
 pub fn colony_ai_tick(_ctx: ReducerContext) {
+    let current_time = spacetimedb::timestamp();
+    
+    // Check for mature young queens
+    for young_queen in Ant::iter().filter(|a| a.ant_type == AntType::YoungQueen) {
+        if let Some(maturation_time) = young_queen.maturation_time {
+            if current_time >= maturation_time {
+                // Time to fly!
+                log::info!("Young queen {} has matured and is flying away!", young_queen.id);
+                
+                // Get colony for player info
+                if let Some(colony) = Colony::filter_by_id(&young_queen.colony_id) {
+                    // Manually trigger nuptial flight for this queen
+                    let ctx = ReducerContext {
+                        sender: colony.player_id,
+                        timestamp: current_time,
+                    };
+                    nuptial_flight(ctx, young_queen.id);
+                }
+            }
+        }
+    }
+    
     // Process each colony with AI enabled
     for colony in Colony::iter().filter(|c| c.ai_enabled) {
         // Check queen health
@@ -1061,6 +1575,10 @@ fn spawn_scout_at_colony(colony: &Colony) {
             target_z: Some(queen.z),
             speed,
             attack_damage: damage,
+            jelly_consumption_rate: get_jelly_consumption_rate(AntType::Scout),
+            last_fed_at: spacetimedb::timestamp(),
+            trait_type: generate_random_trait_for_type(AntType::Scout),
+            maturation_time: None,
         };
         Ant::insert(scout);
     }
@@ -1087,9 +1605,147 @@ fn spawn_worker_at_colony(colony: &Colony) {
             target_z: None,
             speed,
             attack_damage: damage,
+            jelly_consumption_rate: get_jelly_consumption_rate(AntType::Worker),
+            last_fed_at: spacetimedb::timestamp(),
+            trait_type: generate_random_trait_for_type(AntType::Worker),
         };
         Ant::insert(worker);
     }
+}
+
+/// Young queen flies away to start a new colony
+#[spacetimedb(reducer)]
+pub fn nuptial_flight(ctx: ReducerContext, queen_id: u32) {
+    let young_queen = match Ant::filter_by_id(&queen_id) {
+        Some(q) => q,
+        None => {
+            log::error!("Young queen not found: {}", queen_id);
+            return;
+        }
+    };
+    
+    // Verify ownership and type
+    let old_colony = Colony::filter_by_id(&young_queen.colony_id).unwrap();
+    if old_colony.player_id != ctx.sender {
+        log::error!("Young queen not owned by player");
+        return;
+    }
+    
+    if young_queen.ant_type != AntType::YoungQueen {
+        log::error!("Only young queens can fly away");
+        return;
+    }
+    
+    // Update player stats
+    let mut player = Player::filter_by_id(&ctx.sender).unwrap();
+    player.queens_produced += 1;
+    player.generations_survived += 1;
+    
+    // Calculate colony score for legacy bonus
+    let colony_score = old_colony.food + old_colony.water + old_colony.minerals * 2.0 + 
+                      old_colony.queen_jelly * 5.0 + (old_colony.population as f32) * 10.0;
+    
+    if colony_score > player.best_colony_score as f32 {
+        player.best_colony_score = colony_score as u64;
+    }
+    
+    Player::update_by_id(&ctx.sender, player);
+    
+    // Delete the young queen
+    Ant::delete_by_id(&queen_id);
+    
+    // Update old colony population
+    let mut colony_update = old_colony;
+    colony_update.population -= 1;
+    Colony::update_by_id(&colony_update.id, colony_update);
+    
+    // Create new colony at random location
+    let timestamp = spacetimedb::timestamp();
+    let new_x = ((timestamp % 1000) as f32 / 1000.0 - 0.5) * 300.0;
+    let new_y = ((timestamp % 1337) as f32 / 1337.0 - 0.5) * 300.0;
+    
+    // Apply trait bonuses based on the young queen's trait
+    let trait_bonus = young_queen.trait_type.unwrap_or(AntTrait::Survivor);
+    
+    let base_jelly = 20.0;
+    let base_food = 20.0;
+    let base_water = 10.0;
+    let base_health = 200;
+    
+    let (jelly_bonus, food_bonus, water_bonus, health_bonus, larvae_bonus) = match trait_bonus {
+        AntTrait::Fertile => (base_jelly * 1.2, base_food, base_water, base_health, 1),
+        AntTrait::Matriarch => (base_jelly, base_food, base_water, base_health, 2), // Start with extra larvae
+        AntTrait::Survivor => (base_jelly * 1.5, base_food, base_water, base_health, 0),
+        _ => (base_jelly, base_food, base_water, base_health, 0), // Other traits don't affect starting resources
+    };
+    
+    // Add generation bonus (5% per generation)
+    let gen_multiplier = 1.0 + (player.generations_survived as f32 * 0.05);
+    
+    // Create new colony with trait bonuses
+    let new_colony = Colony {
+        id: 0, // autoinc
+        player_id: ctx.sender,
+        queen_id: None,
+        food: food_bonus * gen_multiplier,
+        water: water_bonus * gen_multiplier,
+        minerals: 0.0,
+        larvae: 1 + larvae_bonus, // Start with bonus larvae based on trait
+        queen_jelly: jelly_bonus * gen_multiplier,
+        population: 1,
+        territory_radius: 30.0,
+        created_at: spacetimedb::timestamp(),
+        ai_enabled: false,
+        queen_trait: Some(trait_bonus),
+    };
+    let new_colony_id = Colony::insert(new_colony).unwrap().id;
+    
+    // Create new queen (transformed from young queen)
+    let (_, speed, damage) = get_ant_stats(AntType::Queen);
+    let new_queen = Ant {
+        id: 0, // autoinc
+        colony_id: new_colony_id,
+        ant_type: AntType::Queen,
+        x: new_x,
+        y: new_y,
+        z: -5.0,
+        health: health_bonus,
+        max_health: health_bonus,
+        carrying_resource: None,
+        carrying_amount: 0.0,
+        task: TaskType::Idle,
+        target_x: None,
+        target_y: None,
+        target_z: None,
+        speed,
+        attack_damage: damage,
+        jelly_consumption_rate: 0.0, // Queens don't consume jelly
+        last_fed_at: spacetimedb::timestamp(),
+        trait_type: Some(trait_bonus), // Keep the trait
+        maturation_time: None,
+    };
+    let new_queen_id = Ant::insert(new_queen).unwrap().id;
+    
+    // Update colony with queen reference
+    let mut new_colony_update = Colony::filter_by_id(&new_colony_id).unwrap();
+    new_colony_update.queen_id = Some(new_queen_id);
+    Colony::update_by_id(&new_colony_id, new_colony_update);
+    
+    // Create initial throne room
+    let throne = Chamber {
+        id: 0, // autoinc
+        colony_id: new_colony_id,
+        chamber_type: ChamberType::ThroneRoom,
+        x: new_x,
+        y: new_y,
+        z: -5.0,
+        level: 1,
+        capacity: 1,
+    };
+    Chamber::insert(throne);
+    
+    log::info!("Young queen {} flew away and started new colony {} with trait {:?} (Generation {})", 
+        queen_id, new_colony_id, trait_bonus, player.generations_survived);
 }
 
 #[spacetimedb(init)]

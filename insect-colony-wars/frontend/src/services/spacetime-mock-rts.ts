@@ -2045,6 +2045,37 @@ export class MockSpacetimeService {
     
     // Update ant movements
     this.data.Ant.forEach(ant => {
+      // Check if ant is waiting at entrance and should retry exiting
+      if ((ant as any).waiting_at_entrance && ant.task === TaskType.Idle) {
+        // Periodically check if coast is clear
+        if (Math.random() < 0.1) { // Check 10% of the time
+          const burrowEntrance = this.data.Chamber.find(ch => 
+            ch.colony_id === ant.colony_id && 
+            ch.z === -1 && 
+            ch.is_entrance &&
+            Math.abs(ch.x - ant.x) < 5 &&
+            Math.abs(ch.y - ant.y) < 5
+          );
+          
+          if (burrowEntrance) {
+            const sightDistance = 80;
+            const nearbyPredators = this.data.Predator.filter(pred => {
+              const dist = Math.sqrt(
+                Math.pow(pred.x - burrowEntrance.x, 2) + 
+                Math.pow(pred.y - burrowEntrance.y, 2)
+              );
+              return dist < sightDistance;
+            });
+            
+            if (nearbyPredators.length === 0 && (ant as any).final_target_x !== undefined) {
+              console.log(`✅ Coast is now clear for ant ${ant.id} to exit!`);
+              ant.task = TaskType.Exiting;
+              antsChanged = true;
+            }
+          }
+        }
+      }
+      
       // Check if wounded ant should retreat
       if ((ant as any).wounded && ant.health < ant.max_health * 0.3 && ant.z === 0) {
         // Find nearest burrow entrance to retreat to
@@ -2143,29 +2174,68 @@ export class MockSpacetimeService {
                 ant.target_y = burrowEntrance.y;
                 ant.target_z = burrowEntrance.z;
               } else {
-                // Now at entrance, teleport to surface
-                ant.z = 0; // Move to surface
-                console.log(`🚪 Ant ${ant.id} exited burrow to surface`);
+                // Now at entrance, check for predators before exiting
+                const sightDistance = 80; // Ants can see this far from burrow entrance
+                const nearbyPredators = this.data.Predator.filter(pred => {
+                  const dist = Math.sqrt(
+                    Math.pow(pred.x - burrowEntrance.x, 2) + 
+                    Math.pow(pred.y - burrowEntrance.y, 2)
+                  );
+                  return dist < sightDistance;
+                });
                 
-                // Now go to surface final destination
-                const finalX = (ant as any).final_target_x;
-                const finalY = (ant as any).final_target_y;
-                const finalZ = (ant as any).final_target_z;
-                const finalTask = (ant as any).final_task;
-                
-                if (finalX !== undefined && finalY !== undefined && finalZ !== undefined) {
-                  ant.target_x = finalX;
-                  ant.target_y = finalY;
-                  ant.target_z = finalZ;
-                  ant.task = finalTask || TaskType.Idle;
-                  
-                  // Clear temporary data
-                  delete (ant as any).final_target_x;
-                  delete (ant as any).final_target_y;
-                  delete (ant as any).final_target_z;
-                  delete (ant as any).final_task;
-                } else {
+                if (nearbyPredators.length > 0) {
+                  // Danger! Don't exit, wait at entrance
+                  console.log(`⚠️ Ant ${ant.id} sees ${nearbyPredators.length} predator(s) near entrance! Waiting...`);
                   ant.task = TaskType.Idle;
+                  ant.target_x = null;
+                  ant.target_y = null;
+                  ant.target_z = null;
+                  
+                  // Keep the final destination stored for later
+                  (ant as any).waiting_at_entrance = true;
+                  (ant as any).wait_counter = (ant as any).wait_counter || 0;
+                  (ant as any).wait_counter += 1;
+                  
+                  // After waiting too long, might risk it or give up
+                  if ((ant as any).wait_counter > 100) {
+                    console.log(`😤 Ant ${ant.id} has waited too long, giving up on exit.`);
+                    delete (ant as any).final_target_x;
+                    delete (ant as any).final_target_y;
+                    delete (ant as any).final_target_z;
+                    delete (ant as any).final_task;
+                    delete (ant as any).waiting_at_entrance;
+                    delete (ant as any).wait_counter;
+                  }
+                } else {
+                  // Coast is clear, exit to surface
+                  ant.z = 0; // Move to surface
+                  console.log(`🚪 Ant ${ant.id} exited burrow to surface (coast clear)`);
+                  
+                  // Clean up waiting status
+                  delete (ant as any).waiting_at_entrance;
+                  delete (ant as any).wait_counter;
+                  
+                  // Now go to surface final destination
+                  const finalX = (ant as any).final_target_x;
+                  const finalY = (ant as any).final_target_y;
+                  const finalZ = (ant as any).final_target_z;
+                  const finalTask = (ant as any).final_task;
+                  
+                  if (finalX !== undefined && finalY !== undefined && finalZ !== undefined) {
+                    ant.target_x = finalX;
+                    ant.target_y = finalY;
+                    ant.target_z = finalZ;
+                    ant.task = finalTask || TaskType.Idle;
+                    
+                    // Clear temporary data
+                    delete (ant as any).final_target_x;
+                    delete (ant as any).final_target_y;
+                    delete (ant as any).final_target_z;
+                    delete (ant as any).final_task;
+                  } else {
+                    ant.task = TaskType.Idle;
+                  }
                 }
               }
             } else {
@@ -2486,6 +2556,91 @@ export class MockSpacetimeService {
       const royalWorkers = colonyAnts.filter(a => a.ant_type === AntType.RoyalWorker);
       const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
       
+      // Check for general retreat order
+      if ((colony as any).general_retreat) {
+        console.log(`📯 Colony ${colony.id} is in GENERAL RETREAT mode!`);
+        
+        // Clear retreat after some time
+        if (Date.now() - ((colony as any).last_death_time || 0) > 30000) { // 30 seconds
+          delete (colony as any).general_retreat;
+          (colony as any).casualties = Math.max(0, ((colony as any).casualties || 0) - 1);
+          console.log(`✅ Colony ${colony.id} ending general retreat.`);
+        }
+      }
+      
+      // Check for dangerous predators near colony
+      const surfaceAnts = colonyAnts.filter(a => a.z >= 0);
+      const dangerousPredators = this.data.Predator.filter(pred => {
+        // Birds are too dangerous to fight
+        if (pred.predator_type === 'bird' && pred.health > 50) {
+          // Check if any surface ants are within bird's hunt radius
+          return surfaceAnts.some(ant => {
+            const dist = Math.sqrt(
+              Math.pow(pred.x - ant.x, 2) + 
+              Math.pow(pred.y - ant.y, 2)
+            );
+            return dist < pred.hunt_radius + 50; // Extra safety margin
+          });
+        }
+        return false;
+      });
+      
+      // If dangerous predators detected OR general retreat, retreat all surface ants
+      if (dangerousPredators.length > 0 || (colony as any).general_retreat) {
+        const reason = (colony as any).general_retreat ? "GENERAL RETREAT" : `${dangerousPredators.length} dangerous predator(s) detected`;
+        console.log(`🚨 DANGER! ${reason}! All ants retreating to burrows!`);
+        
+        // Find burrow entrances
+        const burrowEntrances = this.data.Chamber.filter(ch => 
+          ch.colony_id === colony.id && 
+          ch.chamber_type === ChamberType.Burrow &&
+          ch.is_entrance === true
+        );
+        
+        if (burrowEntrances.length > 0) {
+          surfaceAnts.forEach(ant => {
+            if (ant.task !== TaskType.Entering && ant.task !== TaskType.Building) {
+              // Find nearest burrow entrance
+              const nearestEntrance = burrowEntrances.sort((a, b) => {
+                const distA = Math.sqrt(Math.pow(a.x - ant.x, 2) + Math.pow(a.y - ant.y, 2));
+                const distB = Math.sqrt(Math.pow(b.x - ant.x, 2) + Math.pow(b.y - ant.y, 2));
+                return distA - distB;
+              })[0];
+              
+              // Store previous task to resume later
+              (ant as any).task_before_retreat = ant.task;
+              (ant as any).retreating_from_predator = true;
+              
+              // Command ant to retreat
+              ant.task = TaskType.Entering;
+              ant.target_x = nearestEntrance.x;
+              ant.target_y = nearestEntrance.y;
+              ant.target_z = nearestEntrance.z;
+              
+              console.log(`🏃 Ant ${ant.id} retreating to burrow!`);
+            }
+          });
+          antsChanged = true;
+        }
+      } else {
+        // No danger, resume normal activities for ants that were retreating
+        colonyAnts.forEach(ant => {
+          if ((ant as any).retreating_from_predator && ant.z < 0) {
+            delete (ant as any).retreating_from_predator;
+            const previousTask = (ant as any).task_before_retreat;
+            delete (ant as any).task_before_retreat;
+            
+            if (previousTask && ant.task === TaskType.Idle) {
+              console.log(`✅ Danger passed. Ant ${ant.id} resuming previous activities.`);
+              // Resume previous task
+              if (previousTask === TaskType.Gathering && ant.ant_type === AntType.Worker) {
+                this.setWorkerToGather(ant.id);
+              }
+            }
+          }
+        });
+      }
+      
       // Target composition: 2 workers, 1 scout, 2 soldiers, then expand
       const targetWorkers = 2;
       const targetScouts = 1;
@@ -2710,6 +2865,11 @@ export class MockSpacetimeService {
       if (targetAnt) {
         predator.target_ant_id = targetAnt.id;
         
+        // Reset boredom when prey found
+        if (predator.predator_type === 'bird') {
+          (predator as any).boredom = 0;
+        }
+        
         // Move towards target
         const dx = targetAnt.x - predator.x;
         const dy = targetAnt.y - predator.y;
@@ -2730,28 +2890,124 @@ export class MockSpacetimeService {
             (targetAnt as any).wounded_at = Date.now();
             targetAnt.speed = targetAnt.speed * 0.5; // Slow down wounded ant
             console.log(`🕷️ Predator attacks ant ${targetAnt.id}! Health: ${targetAnt.health}/${targetAnt.max_health}`);
+            
+            // HIVE ALERT: Ant under attack!
+            const colony = this.data.Colony.find(c => c.id === targetAnt.colony_id);
+            if (colony) {
+              console.log(`🚨 HIVE ALERT: ${targetAnt.ant_type} under attack at (${Math.round(targetAnt.x)}, ${Math.round(targetAnt.y)})!`);
+              
+              // Mark colony as under threat
+              (colony as any).threat_detected = true;
+              (colony as any).threat_location_x = targetAnt.x;
+              (colony as any).threat_location_y = targetAnt.y;
+              (colony as any).threat_time = Date.now();
+              
+              // Alert nearby soldiers and majors
+              const soldiers = this.data.Ant.filter(a => 
+                a.colony_id === targetAnt.colony_id && 
+                (a.ant_type === AntType.Soldier || a.ant_type === AntType.Major) &&
+                a.task === TaskType.Idle
+              );
+              
+              // Send closest soldiers to help
+              const helpersToSend = Math.min(3, soldiers.length);
+              if (helpersToSend > 0) {
+                const closestSoldiers = soldiers.sort((a, b) => {
+                  const distA = Math.sqrt(Math.pow(a.x - targetAnt.x, 2) + Math.pow(a.y - targetAnt.y, 2));
+                  const distB = Math.sqrt(Math.pow(b.x - targetAnt.x, 2) + Math.pow(b.y - targetAnt.y, 2));
+                  return distA - distB;
+                }).slice(0, helpersToSend);
+                
+                closestSoldiers.forEach(soldier => {
+                  console.log(`⚔️ Soldier ${soldier.id} responding to threat!`);
+                  soldier.task = TaskType.Fighting;
+                  soldier.target_x = targetAnt.x;
+                  soldier.target_y = targetAnt.y;
+                  soldier.target_z = targetAnt.z;
+                  (soldier as any).responding_to_alert = true;
+                });
+              }
+            }
           }
           
           if (targetAnt.health <= 0) {
-            // Remove dead ant
-            this.data.Ant = this.data.Ant.filter(a => a.id !== targetAnt.id);
+            // HIVE ALERT: Ant killed!
             const colony = this.data.Colony.find(c => c.id === targetAnt.colony_id);
             if (colony) {
+              console.log(`💀 HIVE ALERT: ${targetAnt.ant_type} KILLED at (${Math.round(targetAnt.x)}, ${Math.round(targetAnt.y)})!`);
+              console.log(`⚰️ Colony ${colony.id} casualties: ${(colony as any).casualties || 0} → ${((colony as any).casualties || 0) + 1}`);
+              
+              (colony as any).casualties = ((colony as any).casualties || 0) + 1;
+              (colony as any).last_death_time = Date.now();
+              (colony as any).threat_detected = true;
+              (colony as any).threat_location_x = targetAnt.x;
+              (colony as any).threat_location_y = targetAnt.y;
+              
+              // If too many casualties, sound general retreat
+              if ((colony as any).casualties > 3 && Math.random() < 0.5) {
+                console.log(`📯 GENERAL RETREAT! Too many casualties!`);
+                (colony as any).general_retreat = true;
+              }
+              
               colony.population--;
               coloniesChanged = true;
             }
+            
+            // Remove dead ant
+            this.data.Ant = this.data.Ant.filter(a => a.id !== targetAnt.id);
             predator.target_ant_id = null;
-            console.log(`💀 Predator killed ant ${targetAnt.id}`);
             antsChanged = true;
           }
         }
       } else {
         predator.target_ant_id = null;
-        // Random patrol
-        if (Math.random() < 0.05) {
-          predator.x += (Math.random() - 0.5) * predator.speed * 3;
-          predator.y += (Math.random() - 0.5) * predator.speed * 3;
-          predatorChanged = true;
+        
+        // Track boredom for birds
+        if (predator.predator_type === 'bird') {
+          // Initialize boredom counter
+          if ((predator as any).boredom === undefined) {
+            (predator as any).boredom = 0;
+          }
+          
+          // Increase boredom when no prey found
+          (predator as any).boredom += 1;
+          
+          // Birds get bored after ~30 seconds (300 ticks) of no prey
+          if ((predator as any).boredom > 300) {
+            console.log(`🦅 Bird got bored and is flying away!`);
+            // Mark for removal
+            (predator as any).flying_away = true;
+            
+            // Fly up and away
+            predator.y -= predator.speed * 5;
+            predatorChanged = true;
+            
+            // Remove when off screen
+            if (Math.abs(predator.y) > 500) {
+              this.data.Predator = this.data.Predator.filter(p => p.id !== predator.id);
+              console.log(`🦅 Bird has left the area.`);
+            }
+          } else if ((predator as any).boredom > 200) {
+            // Getting bored, search more actively
+            console.log(`🦅 Bird is getting bored... (${(predator as any).boredom}/300)`);
+            predator.x += (Math.random() - 0.5) * predator.speed * 5;
+            predator.y += (Math.random() - 0.5) * predator.speed * 5;
+            predatorChanged = true;
+          } else {
+            // Normal patrol
+            if (Math.random() < 0.05) {
+              predator.x += (Math.random() - 0.5) * predator.speed * 3;
+              predator.y += (Math.random() - 0.5) * predator.speed * 3;
+              predatorChanged = true;
+            }
+          }
+        } else {
+          // Non-bird predators just patrol normally
+          if (Math.random() < 0.05) {
+            predator.x += (Math.random() - 0.5) * predator.speed * 3;
+            predator.y += (Math.random() - 0.5) * predator.speed * 3;
+            predatorChanged = true;
+          }
         }
       }
     });

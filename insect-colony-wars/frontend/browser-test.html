@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Insect Colony Wars - Automated Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 20px;
+            margin: 0;
+        }
+        #status {
+            background: #000;
+            padding: 20px;
+            border: 1px solid #0f0;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        #logs {
+            background: #000;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #0f0;
+            border-radius: 5px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            font-size: 12px;
+        }
+        .error { color: #f00; }
+        .warning { color: #ff0; }
+        .success { color: #0f0; }
+        .info { color: #0ff; }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: monospace;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0a0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Insect Colony Wars - Automated Test Runner</h1>
+    
+    <div id="status">
+        <h2>Test Status</h2>
+        <p>Click "Run Tests" to start automated testing of recent features.</p>
+        <p>This will create a test colony and simulate various scenarios.</p>
+    </div>
+    
+    <div>
+        <button onclick="runTests()">Run Tests</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+        <button onclick="window.open('index.html?mock', '_blank')">Open Game</button>
+    </div>
+    
+    <h3>Test Logs:</h3>
+    <div id="logs"></div>
+    
+    <script type="module">
+        window.testResults = {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            logs: []
+        };
+        
+        window.log = function(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = { timestamp, message, type };
+            window.testResults.logs.push(entry);
+            
+            const logsDiv = document.getElementById('logs');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logsDiv.appendChild(logEntry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        };
+        
+        window.clearLogs = function() {
+            document.getElementById('logs').innerHTML = '';
+            window.testResults.logs = [];
+        };
+        
+        window.runTests = async function() {
+            clearLogs();
+            log('Starting automated tests...', 'info');
+            
+            try {
+                // Open game in iframe
+                const iframe = document.createElement('iframe');
+                iframe.src = 'index.html?mock&autotest=true';
+                iframe.style.position = 'fixed';
+                iframe.style.bottom = '10px';
+                iframe.style.right = '10px';
+                iframe.style.width = '400px';
+                iframe.style.height = '300px';
+                iframe.style.border = '2px solid #0f0';
+                document.body.appendChild(iframe);
+                
+                log('Loading game in test mode...', 'info');
+                
+                // Wait for game to load
+                await new Promise(resolve => {
+                    iframe.onload = resolve;
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                const gameWindow = iframe.contentWindow;
+                const game = gameWindow.game;
+                
+                if (!game) {
+                    throw new Error('Game not loaded properly');
+                }
+                
+                log('Game loaded successfully', 'success');
+                
+                // Test 1: Initialize colony
+                log('\nTest 1: Colony Initialization', 'info');
+                await game.service.call('respawn_as_queen', { x: 0, y: 0 });
+                await wait(100);
+                
+                let data = game.service.data;
+                test('Colony created', data.Colony.length === 1);
+                test('Queen created', data.Ant.length === 1);
+                test('Queen on surface', data.Ant[0].z === 0);
+                
+                // Test 2: Burrow creation
+                log('\nTest 2: Burrow Creation (waiting 6s)', 'info');
+                await wait(6000);
+                
+                data = game.service.data;
+                test('Chambers created', data.Chamber.length >= 2);
+                test('Resources discovered', data.DiscoveredResource.length > 0);
+                
+                // Test 3: First worker
+                log('\nTest 3: Automatic Worker Creation (waiting 3s)', 'info');
+                await wait(3000);
+                
+                data = game.service.data;
+                const workers = data.Ant.filter(a => a.ant_type === 'Worker');
+                test('Worker created', workers.length >= 1);
+                
+                // Test 4: Add bird predator
+                log('\nTest 4: Predator Threat Detection', 'info');
+                const queen = data.Ant.find(a => a.ant_type === 'Queen');
+                
+                game.service.data.Predator.push({
+                    id: 9999,
+                    predator_type: 'bird',
+                    x: queen.x + 50,
+                    y: queen.y,
+                    health: 80,
+                    max_health: 80,
+                    speed: 4,
+                    attack_damage: 30,
+                    hunt_radius: 100,
+                    target_ant_id: null
+                });
+                
+                await wait(2000);
+                
+                // Check console logs
+                const logs = gameWindow.consoleLogs || [];
+                test('Threat detected', logs.some(l => l.includes('DANGER')));
+                
+                // Test 5: Bird boredom
+                log('\nTest 5: Bird Boredom (moving ants underground)', 'info');
+                game.service.data.Ant.forEach(ant => {
+                    if (ant.z >= 0) ant.z = -10;
+                });
+                
+                const bird = game.service.data.Predator.find(p => p.id === 9999);
+                if (bird) bird.boredom = 280; // Speed up test
+                
+                log('Waiting for bird to get bored...', 'info');
+                await wait(5000);
+                
+                // Summary
+                log('\n=== Test Summary ===', 'info');
+                log(`Total tests: ${window.testResults.total}`, 'info');
+                log(`Passed: ${window.testResults.passed}`, 'success');
+                log(`Failed: ${window.testResults.failed}`, 'error');
+                
+                // Clean up
+                document.body.removeChild(iframe);
+                
+            } catch (error) {
+                log(`Test error: ${error.message}`, 'error');
+            }
+        };
+        
+        window.test = function(name, condition) {
+            window.testResults.total++;
+            if (condition) {
+                window.testResults.passed++;
+                log(`✓ ${name}`, 'success');
+            } else {
+                window.testResults.failed++;
+                log(`✗ ${name}`, 'error');
+            }
+        };
+        
+        window.wait = function(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        };
+    </script>
+</body>
+</html>

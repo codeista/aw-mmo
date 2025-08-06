@@ -225,6 +225,14 @@ class UndergroundViewport {
   private isDragging: boolean = false;
   private lastMouseX: number = 0;
   private lastMouseY: number = 0;
+  
+  // Performance metrics
+  private frameCount: number = 0;
+  private lastFpsUpdate: number = Date.now();
+  private currentFps: number = 0;
+  private entitiesRendered: number = 0;
+  private entitiesCulled: number = 0;
+  private showPerformanceMetrics: boolean = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -235,6 +243,13 @@ class UndergroundViewport {
 
   private setupEventListeners() {
     window.addEventListener('resize', () => this.resize());
+    
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'p' || e.key === 'P') {
+        this.showPerformanceMetrics = !this.showPerformanceMetrics;
+      }
+    });
     
     this.canvas.addEventListener('mousedown', (e) => {
       this.isDragging = true;
@@ -297,12 +312,42 @@ class UndergroundViewport {
     return [screenX, screenY * depthScale];
   }
 
+  private getViewportBounds(): { left: number, right: number, top: number, bottom: number } {
+    const halfWidth = this.canvas.width / (2 * this.zoom);
+    const halfHeight = this.canvas.height / (2 * this.zoom);
+    return {
+      left: this.cameraX - halfWidth - 50, // Add 50 unit buffer
+      right: this.cameraX + halfWidth + 50,
+      top: this.cameraY - halfHeight - 50,
+      bottom: this.cameraY + halfHeight + 50
+    };
+  }
+
+  private isInViewport(x: number, y: number): boolean {
+    const bounds = this.getViewportBounds();
+    return x >= bounds.left && x <= bounds.right && 
+           y >= bounds.top && y <= bounds.bottom;
+  }
+
   render(ants: Ant[], colonies: Colony[], chambers: Chamber[], resources: ResourceNode[], 
          obstacles: Obstacle[], prey: Prey[], predators: Predator[], larvae: Larva[],
          placementMode: boolean = false, previewX: number = 0, previewY: number = 0,
          debugMode: boolean = false) {
     if (!this.canvas.width || !this.canvas.height) {
       this.resize();
+    }
+    
+    // Reset performance counters
+    this.entitiesRendered = 0;
+    this.entitiesCulled = 0;
+    
+    // Update FPS
+    this.frameCount++;
+    const now = Date.now();
+    if (now - this.lastFpsUpdate > 1000) {
+      this.currentFps = Math.round(this.frameCount * 1000 / (now - this.lastFpsUpdate));
+      this.frameCount = 0;
+      this.lastFpsUpdate = now;
     }
     
     // Render environment based on surface/underground
@@ -323,6 +368,13 @@ class UndergroundViewport {
     if (!isUnderground) {
       // Draw obstacles on surface
       obstacles.forEach(obstacle => {
+        // Viewport culling
+        if (!this.isInViewport(obstacle.x, obstacle.y)) {
+          this.entitiesCulled++;
+          return;
+        }
+        this.entitiesRendered++;
+        
         const [x, y] = this.worldToScreen(obstacle.x, obstacle.y, 0);
         
         this.ctx.save();
@@ -366,6 +418,8 @@ class UndergroundViewport {
       resources.forEach(resource => {
         // Only show surface resources (z >= 0)
         if (resource.z < 0) return;
+        // Viewport culling
+        if (!this.isInViewport(resource.x, resource.y)) return;
         
         // Check if this resource is discovered by the current colony
         if (window.game && window.game.currentColony) {
@@ -400,6 +454,8 @@ class UndergroundViewport {
         // Only show underground resources
         if (resource.z >= 0) return;
         if (Math.abs(resource.z - this.cameraZ) > zRange) return;
+        // Viewport culling
+        if (!this.isInViewport(resource.x, resource.y)) return;
         
         const [x, y] = this.worldToScreen(resource.x, resource.y, resource.z);
         const size = 20 * this.zoom;
@@ -425,6 +481,9 @@ class UndergroundViewport {
     // Draw prey on surface only
     if (!isUnderground) {
       prey.forEach(p => {
+        // Viewport culling
+        if (!this.isInViewport(p.x, p.y)) return;
+        
         const [x, y] = this.worldToScreen(p.x, p.y, 0);
         
         this.ctx.save();
@@ -462,6 +521,9 @@ class UndergroundViewport {
     // Draw predators on surface
     if (!isUnderground) {
       predators.forEach(pred => {
+        // Viewport culling
+        if (!this.isInViewport(pred.x, pred.y)) return;
+        
         const [x, y] = this.worldToScreen(pred.x, pred.y, 0);
         
         this.ctx.save();
@@ -490,6 +552,50 @@ class UndergroundViewport {
           this.ctx.beginPath();
           this.ctx.arc(x, y, size * 1.5, 0, Math.PI * 2);
           this.ctx.stroke();
+        }
+        
+        // Bird-specific indicators
+        if (pred.predator_type === 'bird') {
+          const boredom = (pred as any).boredom || 0;
+          
+          // Show boredom level
+          if (boredom > 200) {
+            // Getting bored - show question marks
+            this.ctx.font = 'bold 16px Arial';
+            this.ctx.fillStyle = 'yellow';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('?', x - size, y - size * 2);
+            this.ctx.fillText('?', x + size, y - size * 2);
+          }
+          
+          // Flying away animation
+          if ((pred as any).flying_away) {
+            this.ctx.save();
+            this.ctx.globalAlpha = 0.5;
+            // Draw upward motion lines
+            this.ctx.strokeStyle = 'white';
+            this.ctx.lineWidth = 2;
+            for (let i = 0; i < 3; i++) {
+              this.ctx.beginPath();
+              this.ctx.moveTo(x - size + i * size, y + size);
+              this.ctx.lineTo(x - size + i * size, y + size * 2);
+              this.ctx.stroke();
+            }
+            this.ctx.restore();
+          }
+          
+          // Show circling behavior when searching
+          if (!pred.target_ant_id && boredom < 200) {
+            const circleRadius = size * 3;
+            this.ctx.save();
+            this.ctx.strokeStyle = 'rgba(139, 69, 19, 0.3)';
+            this.ctx.lineWidth = 1;
+            this.ctx.setLineDash([5, 5]);
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, circleRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.restore();
+          }
         }
         
         this.ctx.restore();
@@ -548,6 +654,9 @@ class UndergroundViewport {
     
     // Draw chambers based on view
     chambers.forEach(chamber => {
+      // Viewport culling
+      if (!this.isInViewport(chamber.x, chamber.y)) return;
+      
       // Burrows: Show entrance on surface, show as chamber underground
       if (chamber.chamber_type === ChamberType.Burrow) {
         const isEntrance = (chamber as any).is_entrance;
@@ -659,6 +768,13 @@ class UndergroundViewport {
       if (!isUnderground && ant.z < 0) return; // Don't show underground ants in surface view
       if (isUnderground && ant.z >= 0) return; // Don't show surface ants in underground view
       
+      // Viewport culling - critical for performance with many ants
+      if (!this.isInViewport(ant.x, ant.y)) {
+        this.entitiesCulled++;
+        return;
+      }
+      this.entitiesRendered++;
+      
       const [x, y] = this.worldToScreen(ant.x, ant.y, ant.z);
       const size = this.getAntSize(ant.ant_type) * this.zoom;
       
@@ -677,8 +793,42 @@ class UndergroundViewport {
       this.ctx.save();
       this.ctx.globalAlpha = opacity;
       
-      // Draw animated ant sprite
-      this.drawAnimatedAnt(x, y, ant, size);
+      // Level of Detail based on zoom
+      if (this.zoom < 0.7) {
+        // Far away - just dots
+        this.drawAntDot(x, y, ant, size);
+      } else if (this.zoom < 1.5) {
+        // Medium distance - simple shapes
+        this.drawSimpleAnt(x, y, ant, size);
+      } else {
+        // Close up - full animated detail
+        this.drawAnimatedAnt(x, y, ant, size);
+      }
+      
+      // Simple carrying indicator
+      if (ant.carrying_resource && ant.carrying_amount > 0) {
+        const resourceColors: Record<string, string> = {
+          'Food': '#4CAF50',
+          'Water': '#2196F3',
+          'Minerals': '#FF9800',
+          'Larvae': '#E91E63'
+        };
+        
+        const resourceColor = resourceColors[ant.carrying_resource] || '#999';
+        
+        // Draw resource dot above ant with subtle bobbing
+        const bobOffset = Math.sin(Date.now() * 0.003 + ant.id) * 1;
+        this.ctx.fillStyle = resourceColor;
+        this.ctx.globalAlpha = 0.9;
+        this.ctx.beginPath();
+        this.ctx.arc(x, y - size * 0.7 + bobOffset, 3 * this.zoom, 0, Math.PI * 2);
+        this.ctx.fill();
+        
+        // Add small outline for visibility
+        this.ctx.strokeStyle = 'white';
+        this.ctx.lineWidth = 0.5;
+        this.ctx.stroke();
+      }
       
       // Draw digging animation for queens building
       if (ant.ant_type === AntType.Queen && ant.task === TaskType.Building) {
@@ -796,6 +946,33 @@ class UndergroundViewport {
     if (debugMode) {
       this.drawDebugOverlay(ants, resources, colonies);
     }
+    
+    // Draw performance metrics (toggle with P key)
+    if (this.showPerformanceMetrics || debugMode) {
+      this.drawPerformanceMetrics();
+    }
+  }
+  
+  private drawPerformanceMetrics() {
+    const metrics = [
+      `FPS: ${this.currentFps}`,
+      `Zoom: ${this.zoom.toFixed(2)}x`,
+      `Rendered: ${this.entitiesRendered}`,
+      `Culled: ${this.entitiesCulled}`,
+      `Camera: (${Math.round(this.cameraX)}, ${Math.round(this.cameraY)}, ${Math.round(this.cameraZ)})`
+    ];
+    
+    // Background
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    this.ctx.fillRect(10, 10, 150, metrics.length * 20 + 10);
+    
+    // Text
+    this.ctx.fillStyle = '#00FF00';
+    this.ctx.font = '12px monospace';
+    this.ctx.textAlign = 'left';
+    metrics.forEach((metric, i) => {
+      this.ctx.fillText(metric, 15, 25 + i * 20);
+    });
   }
   
   private drawUndergroundChamber(chamber: Chamber) {
@@ -1104,6 +1281,80 @@ class UndergroundViewport {
     this.ctx.closePath();
   }
   
+  private drawSimpleAnt(x: number, y: number, ant: Ant, size: number) {
+    // Medium detail - basic shapes without complex animations
+    const antColor = this.getAntColor(ant.ant_type);
+    
+    // Simple body segments
+    this.ctx.fillStyle = antColor;
+    this.ctx.strokeStyle = this.darkenColor(antColor, 0.7);
+    this.ctx.lineWidth = 0.5;
+    
+    // Calculate direction if moving
+    let direction = 0;
+    if (ant.target_x !== null && ant.target_y !== null) {
+      const dx = ant.target_x - ant.x;
+      const dy = ant.target_y - ant.y;
+      direction = Math.atan2(dy, dx);
+    }
+    
+    this.ctx.save();
+    this.ctx.translate(x, y);
+    this.ctx.rotate(direction);
+    
+    // Abdomen
+    this.ctx.beginPath();
+    this.ctx.ellipse(-3, 0, size * 0.4, size * 0.3, 0, 0, Math.PI * 2);
+    this.ctx.fill();
+    
+    // Thorax
+    this.ctx.beginPath();
+    this.ctx.ellipse(0, 0, size * 0.3, size * 0.25, 0, 0, Math.PI * 2);
+    this.ctx.fill();
+    
+    // Head
+    this.ctx.beginPath();
+    this.ctx.ellipse(3, 0, size * 0.25, size * 0.2, 0, 0, Math.PI * 2);
+    this.ctx.fill();
+    
+    // Simple trait indicator
+    if (ant.trait_type) {
+      this.ctx.fillStyle = this.getTraitColor(ant.trait_type);
+      this.ctx.beginPath();
+      this.ctx.arc(0, -size * 0.4, 2, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+    
+    this.ctx.restore();
+  }
+  
+  private drawAntDot(x: number, y: number, ant: Ant, size: number) {
+    // Minimal detail - just a colored dot
+    const antColor = this.getAntColor(ant.ant_type);
+    this.ctx.fillStyle = antColor;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, Math.max(2, size * 0.15), 0, Math.PI * 2);
+    this.ctx.fill();
+    
+    // Tiny trait indicator
+    if (ant.trait_type) {
+      this.ctx.fillStyle = this.getTraitColor(ant.trait_type);
+      this.ctx.beginPath();
+      this.ctx.arc(x, y - 3, 1, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+  }
+  
+  private getTraitColor(trait: string): string {
+    switch(trait) {
+      case 'acid': return '#00FF00';
+      case 'speed': return '#00FFFF';
+      case 'strength': return '#FF0000';
+      case 'pheromone': return '#FF00FF';
+      default: return '#FFFF00';
+    }
+  }
+  
   private drawAnimatedAnt(x: number, y: number, ant: Ant, size: number) {
     const time = Date.now() * 0.001;
     const moving = ant.task === TaskType.Exploring || ant.task === TaskType.Returning || 
@@ -1113,7 +1364,7 @@ class UndergroundViewport {
     // Calculate ant direction and speed based on movement
     let direction = 0;
     let moveSpeed = 0;
-    if (ant.target_x !== undefined && ant.target_y !== undefined) {
+    if (ant.target_x !== null && ant.target_y !== null) {
       const dx = ant.target_x - ant.x;
       const dy = ant.target_y - ant.y;
       direction = Math.atan2(dy, dx);
