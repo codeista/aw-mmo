@@ -1,5 +1,7 @@
 import './style.css';
-import { createImprovedUI, addAlert, updateThreatLevel, updateUnitBreakdown } from './ui-redesign';
+import { createImprovedUI, updateThreatLevel } from './ui-redesign';
+// Import alert and unit functions - will be integrated later
+import { addAlert, updateUnitBreakdown } from './ui-redesign';
 
 // Types matching the backend
 export enum AntType {
@@ -2932,7 +2934,7 @@ class InsectColonyWarsGame {
     app.innerHTML = createImprovedUI();
 
     // Setup event listeners
-    document.getElementById('createColonyBtn')!.addEventListener('click', () => {
+    document.getElementById('createColonyBtn')?.addEventListener('click', () => {
       this.createColony();
     });
     
@@ -2959,7 +2961,8 @@ class InsectColonyWarsGame {
         document.querySelectorAll('.tab-content').forEach(content => {
           content.setAttribute('style', 'display: none;');
         });
-        document.getElementById(`${tabName}Tab`)!.style.display = 'flex';
+        const tabContent = document.getElementById(`${tabName}Tab`);
+        if (tabContent) tabContent.style.display = 'flex';
       });
     });
 
@@ -2991,15 +2994,7 @@ class InsectColonyWarsGame {
       });
     });
 
-    document.getElementById('chatInput')!.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        const input = e.target as HTMLInputElement;
-        if (input.value.trim()) {
-          // Chat will be implemented later
-          input.value = '';
-        }
-      }
-    });
+    // Chat removed in new UI design
     
     document.getElementById('toggleAI')?.addEventListener('click', () => {
       if (this.currentColony) {
@@ -3009,7 +3004,7 @@ class InsectColonyWarsGame {
 
     document.getElementById('autoSpawnToggle')?.addEventListener('click', () => {
       this.autoSpawnMode = !this.autoSpawnMode;
-      this.updateAutoSpawnUI();
+      // Auto spawn UI removed in new design
       console.log(`Auto-spawn mode ${this.autoSpawnMode ? 'enabled' : 'disabled'}`);
     });
     
@@ -3045,16 +3040,19 @@ class InsectColonyWarsGame {
     document.getElementById('huntBtn')?.addEventListener('click', () => {
       if (this.currentColony) {
         // Toggle hunt mode
-        const btn = document.getElementById('huntBtn')!;
+        const btn = document.getElementById('huntBtn');
+        if (!btn) return;
         btn.classList.toggle('active');
         this.huntMode = btn.classList.contains('active');
         btn.textContent = this.huntMode ? '⚔️ Cancel Hunt' : '⚔️ Hunt Mode';
         // Disable dig mode if enabling hunt mode
         if (this.huntMode) {
           this.digMode = false;
-          const digBtn = document.getElementById('digBtn')!;
-          digBtn.classList.remove('active');
-          digBtn.textContent = '⛏️ Dig Mode';
+          const digBtn = document.getElementById('digBtn');
+          if (digBtn) {
+            digBtn.classList.remove('active');
+            digBtn.textContent = '⛏️ Dig Mode';
+          }
         }
       }
     });
@@ -3062,16 +3060,19 @@ class InsectColonyWarsGame {
     document.getElementById('digBtn')?.addEventListener('click', () => {
       if (this.currentColony) {
         // Toggle dig mode
-        const btn = document.getElementById('digBtn')!;
+        const btn = document.getElementById('digBtn');
+        if (!btn) return;
         btn.classList.toggle('active');
         this.digMode = btn.classList.contains('active');
         btn.textContent = this.digMode ? '⛏️ Cancel Dig' : '⛏️ Dig Mode';
         // Disable hunt mode if enabling dig mode
         if (this.digMode) {
           this.huntMode = false;
-          const huntBtn = document.getElementById('huntBtn')!;
-          huntBtn.classList.remove('active');
-          huntBtn.textContent = '⚔️ Hunt Mode';
+          const huntBtn = document.getElementById('huntBtn');
+          if (huntBtn) {
+            huntBtn.classList.remove('active');
+            huntBtn.textContent = '⚔️ Hunt Mode';
+          }
         }
       }
     });
@@ -3161,31 +3162,58 @@ class InsectColonyWarsGame {
 
   private updateUI() {
     if (this.currentPlayer) {
-      document.getElementById('playerName')!.textContent = this.currentPlayer.username;
-      const genInfo = document.getElementById('generationInfo');
-      if (genInfo) {
-        genInfo.textContent = `Gen: ${this.currentPlayer.generations_survived || 0} | Queens: ${this.currentPlayer.queens_produced || 0}`;
-      }
+      const playerNameEl = document.getElementById('playerName');
+      const generationEl = document.getElementById('generation');
+      const queensProducedEl = document.getElementById('queensProduced');
+      
+      if (playerNameEl) playerNameEl.textContent = this.currentPlayer.username;
+      if (generationEl) generationEl.textContent = this.currentPlayer.generations_survived?.toString() || '0';
+      if (queensProducedEl) queensProducedEl.textContent = this.currentPlayer.queens_produced?.toString() || '0';
     }
     
-    this.updateAutoSpawnUI();
+    // Auto spawn UI removed in new design
+    
+    // Update threat monitoring
+    const predators = this.service?.data?.Predator || [];
+    const birds = predators.filter(p => p.predator_type === 'bird').length;
+    const spiders = predators.filter(p => p.predator_type === 'spider').length;
+    const beetles = predators.filter(p => p.predator_type === 'beetle').length;
+    
+    const birdCountEl = document.getElementById('birdCount');
+    const spiderCountEl = document.getElementById('spiderCount');
+    const beetleCountEl = document.getElementById('beetleCount');
+    
+    if (birdCountEl) birdCountEl.textContent = birds.toString();
+    if (spiderCountEl) spiderCountEl.textContent = spiders.toString();
+    if (beetleCountEl) beetleCountEl.textContent = beetles.toString();
+    
+    updateThreatLevel(birds + spiders + beetles);
 
     if (this.currentColony) {
       const traitDisplay = this.currentColony.queen_trait ? ` [${this.currentColony.queen_trait}]` : '';
-      document.getElementById('colonyStats')!.textContent = `Colony #${this.currentColony.id}${traitDisplay}`;
-      document.getElementById('food')!.textContent = Math.floor(this.currentColony.food).toString();
-      document.getElementById('water')!.textContent = Math.floor(this.currentColony.water || 0).toString();
-      document.getElementById('minerals')!.textContent = Math.floor(this.currentColony.minerals).toString();
-      document.getElementById('larvae')!.textContent = this.currentColony.larvae.toString();
-      document.getElementById('queenJelly')!.textContent = Math.floor(this.currentColony.queen_jelly || 0).toString();
-      document.getElementById('population')!.textContent = this.currentColony.population.toString();
+      // Colony stats handled by new UI elements
+      const foodEl = document.getElementById('food');
+      const waterEl = document.getElementById('water');
+      const mineralsEl = document.getElementById('minerals');
+      const larvaeEl = document.getElementById('larvae');
+      const queenJellyEl = document.getElementById('queenJelly');
+      const populationEl = document.getElementById('population');
+      
+      if (foodEl) foodEl.textContent = Math.floor(this.currentColony.food).toString();
+      if (waterEl) waterEl.textContent = Math.floor(this.currentColony.water || 0).toString();
+      if (mineralsEl) mineralsEl.textContent = Math.floor(this.currentColony.minerals).toString();
+      if (larvaeEl) larvaeEl.textContent = this.currentColony.larvae.toString();
+      if (queenJellyEl) queenJellyEl.textContent = Math.floor(this.currentColony.queen_jelly || 0).toString();
+      if (populationEl) populationEl.textContent = this.currentColony.population.toString();
       
       // Calculate population capacity
       if (this.service && this.service.calculateColonyCapacity) {
         const capacity = this.service.calculateColonyCapacity(this.currentColony.id);
         const used = this.service.calculateColonyPopulation(this.currentColony.id);
-        document.getElementById('popCapacity')!.textContent = capacity.toString();
-        document.getElementById('population')!.textContent = used.toString();
+        const popCapacityEl = document.getElementById('popCapacity');
+        const populationEl2 = document.getElementById('population');
+        if (popCapacityEl) popCapacityEl.textContent = capacity.toString();
+        if (populationEl2) populationEl2.textContent = used.toString();
       }
       
       // Update AI status
@@ -3194,11 +3222,11 @@ class InsectColonyWarsGame {
         aiStatus.textContent = this.currentColony.ai_enabled ? 'ON' : 'OFF';
       }
       
-      document.getElementById('createColonyBtn')!.style.display = 'none';
-      document.getElementById('colonyActions')!.style.display = 'flex';
+      const noColonyPanel = document.getElementById('noColonyPanel');
+      if (noColonyPanel) noColonyPanel.style.display = 'none';
     } else {
-      document.getElementById('createColonyBtn')!.style.display = 'block';
-      document.getElementById('colonyActions')!.style.display = 'none';
+      const noColonyPanel = document.getElementById('noColonyPanel');
+      if (noColonyPanel) noColonyPanel.style.display = 'block';
       
       // Auto-spawn for brand new players only (never had a colony)
       if (this.currentPlayer && !this.placementMode && !this.isSpawning && this.currentPlayer.total_colonies === 0) {
@@ -3253,10 +3281,10 @@ class InsectColonyWarsGame {
         const info = Array.from(types.entries())
           .map(([type, count]) => `${count} ${type}`)
           .join(', ');
-        document.getElementById('selectedInfo')!.textContent = `Selected: ${info}${youngQueenTrait}${maturationInfo}`;
+        // Selection info handled by new UI
       }
     } else {
-      document.getElementById('selectedInfo')!.textContent = 'No selection';
+      // No selection
     }
     
     // Update unit panel
@@ -3602,7 +3630,7 @@ class InsectColonyWarsGame {
     }
     
     if (info) {
-      document.getElementById('selectedInfo')!.textContent = info;
+      // Selection info handled by new UI
     }
     
     this.updateUI();
@@ -3622,9 +3650,11 @@ class InsectColonyWarsGame {
       });
       // Exit hunt mode
       this.huntMode = false;
-      const btn = document.getElementById('huntBtn')!;
-      btn.classList.remove('active');
-      btn.textContent = '⚔️ Hunt Mode';
+      const btn = document.getElementById('huntBtn');
+      if (btn) {
+        btn.classList.remove('active');
+        btn.textContent = '⚔️ Hunt Mode';
+      }
     } else if (this.digMode && isRightClick) {
       // Command selected workers to dig at location
       if (this.selectedAntIds.length > 0) {
@@ -3647,9 +3677,11 @@ class InsectColonyWarsGame {
       }
       // Exit dig mode
       this.digMode = false;
-      const btn = document.getElementById('digBtn')!;
-      btn.classList.remove('active');
-      btn.textContent = '⛏️ Dig Mode';
+      const btn = document.getElementById('digBtn');
+      if (btn) {
+        btn.classList.remove('active');
+        btn.textContent = '⛏️ Dig Mode';
+      }
     } else if (isRightClick && this.selectedAntIds.length > 0) {
       // Command selected ants
       this.service.call('command_ants', {
@@ -3683,8 +3715,9 @@ class InsectColonyWarsGame {
   }
   
   private updateTaskPanel() {
-    const taskPanel = document.getElementById('taskPanel')!;
-    const selectedUnitInfo = document.getElementById('selectedUnitInfo')!;
+    const taskPanel = document.getElementById('taskPanel');
+    const selectedUnitInfo = document.getElementById('selectedUnitInfo');
+    if (!taskPanel || !selectedUnitInfo) return;
     
     // Only show task panel for single unit selection
     if (this.selectedAntIds.length === 1) {
@@ -3887,7 +3920,8 @@ class InsectColonyWarsGame {
   
   private enterPlacementMode() {
     this.placementMode = true;
-    document.getElementById('placementMode')!.style.display = 'flex';
+    const placementMode = document.getElementById('placementMode');
+    if (placementMode) placementMode.style.display = 'flex';
     // Clear any selections
     this.selectedAntIds = [];
     this.viewport.clearSelection();
@@ -3896,16 +3930,11 @@ class InsectColonyWarsGame {
   
   private exitPlacementMode() {
     this.placementMode = false;
-    document.getElementById('placementMode')!.style.display = 'none';
+    const placementMode = document.getElementById('placementMode');
+    if (placementMode) placementMode.style.display = 'none';
   }
 
-  private updateAutoSpawnUI() {
-    const button = document.getElementById('autoSpawnToggle');
-    if (button) {
-      button.textContent = this.autoSpawnMode ? '🎯 Auto' : '🎯 Manual';
-      button.style.backgroundColor = this.autoSpawnMode ? '#4CAF50' : '#666';
-    }
-  }
+  // Auto spawn UI method removed
   
   private switchToSurface() {
     this.currentView = 'surface';
@@ -3945,14 +3974,16 @@ class InsectColonyWarsGame {
   }
   
   private updateViewButtons() {
-    document.getElementById('surfaceBtn')!.classList.toggle('active', this.currentView === 'surface');
-    document.getElementById('undergroundBtn')!.classList.toggle('active', this.currentView === 'underground');
+    const surfaceBtn = document.getElementById('surfaceBtn');
+    const undergroundBtn = document.getElementById('undergroundBtn');
+    if (surfaceBtn) surfaceBtn.classList.toggle('active', this.currentView === 'surface');
+    if (undergroundBtn) undergroundBtn.classList.toggle('active', this.currentView === 'underground');
   }
   
   private updateZLevelDisplay() {
-    const zDisplay = document.getElementById('zLevelDisplay');
-    if (zDisplay) {
-      zDisplay.textContent = `Z: ${this.viewport.cameraZ.toFixed(0)}`;
+    const zLevel = document.getElementById('zLevel');
+    if (zLevel) {
+      zLevel.textContent = this.viewport.cameraZ.toFixed(0);
     }
   }
   
@@ -3960,8 +3991,10 @@ class InsectColonyWarsGame {
     this.currentView = view;
     
     // Update button states
-    document.getElementById('surfaceBtn')!.classList.toggle('active', view === 'surface');
-    document.getElementById('undergroundBtn')!.classList.toggle('active', view === 'underground');
+    const surfaceBtn = document.getElementById('surfaceBtn');
+    const undergroundBtn = document.getElementById('undergroundBtn');
+    if (surfaceBtn) surfaceBtn.classList.toggle('active', view === 'surface');
+    if (undergroundBtn) undergroundBtn.classList.toggle('active', view === 'underground');
     
     // Update camera Z level
     if (view === 'surface') {
@@ -3971,7 +4004,8 @@ class InsectColonyWarsGame {
     }
     
     // Update Z level display
-    document.getElementById('zLevel')!.textContent = this.viewport.cameraZ.toString();
+    const zLevelEl = document.getElementById('zLevel');
+    if (zLevelEl) zLevelEl.textContent = this.viewport.cameraZ.toString();
     
     // Update what's visible based on view
     this.updateVisibility();
