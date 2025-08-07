@@ -4510,10 +4510,11 @@ class InsectColonyWarsGame {
         // Store preference
         localStorage.setItem('spawnPredators', this.spawnPredators.toString());
         
-        // Update mock service
-        if (this.service.setSpawnSettings) {
-          this.service.setSpawnSettings({ spawnPredators: this.spawnPredators });
-        }
+        // Update mock service spawn settings
+        this.service.call('set_spawn_settings', { 
+          spawn_predators: this.spawnPredators, 
+          spawn_prey: this.spawnPrey 
+        });
       });
       
       // Load saved preference
@@ -4545,10 +4546,11 @@ class InsectColonyWarsGame {
         // Store preference
         localStorage.setItem('spawnPrey', this.spawnPrey.toString());
         
-        // Update mock service
-        if (this.service.setSpawnSettings) {
-          this.service.setSpawnSettings({ spawnPrey: this.spawnPrey });
-        }
+        // Update mock service spawn settings
+        this.service.call('set_spawn_settings', { 
+          spawn_predators: this.spawnPredators, 
+          spawn_prey: this.spawnPrey 
+        });
       });
       
       // Load saved preference
@@ -4561,12 +4563,10 @@ class InsectColonyWarsGame {
     }
     
     // Set initial spawn settings
-    if (this.service.setSpawnSettings) {
-      this.service.setSpawnSettings({ 
-        spawnPredators: this.spawnPredators,
-        spawnPrey: this.spawnPrey 
-      });
-    }
+    this.service.call('set_spawn_settings', { 
+      spawn_predators: this.spawnPredators,
+      spawn_prey: this.spawnPrey 
+    });
   }
 
   private setupColonyDashboard() {
@@ -5157,6 +5157,37 @@ class InsectColonyWarsGame {
   }
 }
 
+// Clear localStorage on development server start (optional)
+// Add ?keepStorage to URL to preserve localStorage during development
+if (import.meta.env.DEV && !window.location.search.includes('keepStorage')) {
+  console.log('🧹 Clearing game state for fresh development start...');
+  
+  // Preserve user settings while clearing game state
+  const settingsToPreserve = [
+    'spawnPredators',
+    'spawnPrey',
+    'colonyDashboardCollapsed'
+  ];
+  
+  const savedSettings: Record<string, string> = {};
+  settingsToPreserve.forEach(key => {
+    const value = localStorage.getItem(key);
+    if (value !== null) {
+      savedSettings[key] = value;
+    }
+  });
+  
+  // Clear all localStorage
+  localStorage.clear();
+  
+  // Restore settings
+  Object.entries(savedSettings).forEach(([key, value]) => {
+    localStorage.setItem(key, value);
+  });
+  
+  console.log('✨ Game state cleared. Settings preserved. Add ?keepStorage to URL to keep all data.');
+}
+
 // Initialize game
 declare global {
   interface Window {
@@ -5164,6 +5195,7 @@ declare global {
     showGameState: () => void;
     showActions: () => void;
     clearGameData: () => void;
+    clearMockState: () => void;
   }
 }
 
@@ -5221,6 +5253,14 @@ window.clearGameData = () => {
     console.log('✅ Game data cleared. Reloading...');
     window.location.reload();
   }
+};
+
+// Add a gentler clear function that only clears mock state
+window.clearMockState = () => {
+  console.log('🧹 Clearing mock service state...');
+  localStorage.removeItem('mockGameState');
+  console.log('✅ Mock state cleared. Reload the page to start fresh.');
+  console.log('💡 Use clearGameData() to clear all data including settings.');
 };
 
 async function init() {

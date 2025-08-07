@@ -111,6 +111,11 @@ Start as a queen ant landing in a dangerous world filled with predators, hostile
 - When mature, she automatically flies away to safety
 - Next game starts with her bonus trait!
 
+### Defeat Conditions
+- Queen dies (all ants in colony die immediately)
+- Colony runs out of queen jelly
+- No viable ants remain to continue
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -171,12 +176,17 @@ npm run dev
 ### UI Features
 - **Compact Top Bar**: Colony info, resources, and view controls
 - **Expandable Left Panel**: 
-  - Colony Overview with spawn toggles
+  - Colony Overview with AI and spawn toggles
   - Production rates display
   - Construction options
   - Tasks & Units with ant selection
 - **Unit Info Window**: Detailed ant stats when selected
-- **Command Queue**: Automated task management with priorities
+- **Command Queue**: Visual queue display with priority management
+- **Colony Status Dashboard**: 
+  - Real-time colony phase tracking
+  - Setup task checklist
+  - Health indicators for resources
+  - Activity monitor showing live events
 
 ### Individual Unit Control
 - Select single unit to see task panel
@@ -203,6 +213,21 @@ npm run dev
 - Click on any game object to see detailed information
 - Watch the maturation timer - protect your young queen at all costs
 - Each successful escape makes your next generation stronger
+
+### Game Settings & Console Commands
+- **Spawn Controls**: Toggle predators and prey on/off (kills existing entities)
+- **AI Toggle**: Enable/disable colony AI for manual control
+- **Console Commands**:
+  - `clearMockState()` - Clear game state, preserve settings
+  - `clearGameData()` - Clear all data and reload
+  - `showGameState()` - Display current game state
+  - `showActions()` - List available actions
+  - `viewport.stop()` - Pause game simulation
+
+### Development Features
+- **Auto-clear on start**: Game state clears on dev server start
+- **Preserve data**: Add `?keepStorage` to URL to keep state
+- **Settings preservation**: User preferences survive state clearing
 
 ## 🛠️ Development
 
@@ -257,8 +282,12 @@ The game is fully playable with:
 - Compact expandable UI with command queue
 - Energy system forcing strategic surface/underground balance
 - Unit info windows with direct control
-- Spawn toggles for predators/prey
+- Spawn toggles for predators/prey (kills existing entities)
 - Debug overlay (Shift+D) showing unit influence
+- Colony status dashboard with phase tracking
+- Real-time activity monitoring
+- AI toggle for manual/automatic colony control
+- Realistic colony collapse when queen dies
 
 ## 📈 Planned Features
 
