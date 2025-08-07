@@ -2915,16 +2915,6 @@ class InsectColonyWarsGame {
     });
 
     service.on('ResourceNode', (resources: ResourceNode[]) => {
-      // Track newly discovered resources
-      resources.forEach(resource => {
-        const existing = this.resources.get(resource.id);
-        // Check if this resource was just discovered by checking DiscoveredResource table
-        const wasDiscovered = this.currentColony && Array.from(this.discoveredResources.values())
-          .some(dr => dr.colony_id === this.currentColony!.id && dr.resource_id === existing?.id);
-        
-        this.resources.set(resource.id, resource);
-      });
-      
       this.resources.clear();
       resources.forEach(resource => this.resources.set(resource.id, resource));
     });
@@ -5089,27 +5079,6 @@ class InsectColonyWarsGame {
       case 'dig':
         nextCommand.antIds.forEach(antId => {
           this.assignTask(antId, 'dig');
-        });
-        break;
-      
-      case 'scout':
-        nextCommand.antIds.forEach(antId => {
-          const ant = this.ants.get(antId);
-          if (ant) {
-            // Send to random location
-            const angle = Math.random() * Math.PI * 2;
-            const distance = 100 + Math.random() * 200;
-            const targetX = ant.x + Math.cos(angle) * distance;
-            const targetY = ant.y + Math.sin(angle) * distance;
-            
-            this.service.call('command_ants', {
-              ant_ids: [antId],
-              target_x: targetX,
-              target_y: targetY,
-              target_z: 0,
-              task_override: 'scout'
-            });
-          }
         });
         break;
       
