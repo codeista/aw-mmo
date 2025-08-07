@@ -3715,6 +3715,14 @@ class InsectColonyWarsGame {
     const ant = this.ants.get(antId);
     if (!ant || ant.colony_id !== this.currentColony?.id) return;
     
+    console.log(`📋 Assigning task '${task}' to ant ${antId} (${ant.ant_type})`);
+    
+    // If ant doesn't have last_fed_at, set it to now
+    if (!ant.last_fed_at) {
+      console.log(`⚠️ Ant ${antId} has no last_fed_at, setting to now`);
+      ant.last_fed_at = Date.now();
+    }
+    
     switch (task) {
       case 'gather':
         // Find nearest discovered resource
@@ -3722,6 +3730,8 @@ class InsectColonyWarsGame {
           .filter(dr => dr.colony_id === this.currentColony!.id)
           .map(dr => this.resources.get(dr.resource_id))
           .filter(r => r && r.amount > 0);
+        
+        console.log(`🔍 Found ${resources.length} discovered resources`);
         
         if (resources.length > 0) {
           // Find closest resource
@@ -3897,11 +3907,11 @@ class InsectColonyWarsGame {
     
     // Update energy
     const now = Date.now();
-    const timeSinceFeeding = now - ant.last_fed_at;
+    const timeSinceFeeding = ant.last_fed_at ? now - ant.last_fed_at : 0;
     const minutesSinceFeeding = timeSinceFeeding / (60 * 1000);
     const energyDrainMultiplier = ant.z >= 0 ? 1.5 : 1.0;
     const effectiveMinutes = minutesSinceFeeding * energyDrainMultiplier;
-    const energy = Math.max(0, 100 - (effectiveMinutes / 20 * 100));
+    const energy = ant.last_fed_at ? Math.max(0, 100 - (effectiveMinutes / 20 * 100)) : 100;
     
     const energyFill = document.getElementById('unitEnergyFill') as HTMLElement;
     const energyText = document.getElementById('unitEnergyText');
@@ -4887,11 +4897,11 @@ class InsectColonyWarsGame {
     antList.innerHTML = filteredAnts.map(ant => {
       // Calculate energy from last_fed_at timestamp
       const now = Date.now();
-      const timeSinceFeeding = now - ant.last_fed_at;
+      const timeSinceFeeding = ant.last_fed_at ? now - ant.last_fed_at : 0;
       const minutesSinceFeeding = timeSinceFeeding / 60000;
       const energyDrainMultiplier = ant.z >= 0 ? 1.5 : 1.0;
       const effectiveMinutes = minutesSinceFeeding * energyDrainMultiplier;
-      const energy = Math.max(0, 100 - (effectiveMinutes / 20 * 100));
+      const energy = ant.last_fed_at ? Math.max(0, 100 - (effectiveMinutes / 20 * 100)) : 100;
       
       const energyClass = energy > 50 ? 'high' : energy > 25 ? 'medium' : 'low';
       const isSelected = this.selectedAntsInPanel.has(ant.id);
@@ -5052,29 +5062,33 @@ class InsectColonyWarsGame {
       // Execute command based on type
       switch (nextCommand.command) {
       case 'gather':
-        this.service.call('hive_command', {
-          colony_id: this.currentColony?.id,
-          command: 'gather'
+        // Use assignTask for individual ant commands
+        nextCommand.antIds.forEach(antId => {
+          this.assignTask(antId, 'gather');
         });
         break;
       
       case 'return':
         nextCommand.antIds.forEach(antId => {
-          const ant = this.ants.get(antId);
-          if (ant) {
-            const chambers = Array.from(this.chambers.values())
-              .filter(ch => ch.colony_id === ant.colony_id);
-            const target = chambers.find(ch => ch.chamber_type === ChamberType.ThroneRoom) || chambers[0];
-            
-            if (target) {
-              this.service.call('command_ants', {
-                ant_ids: [antId],
-                target_x: target.x,
-                target_y: target.y,
-                target_z: target.z
-              });
-            }
-          }
+          this.assignTask(antId, 'return');
+        });
+        break;
+        
+      case 'scout':
+        nextCommand.antIds.forEach(antId => {
+          this.assignTask(antId, 'scout');
+        });
+        break;
+        
+      case 'guard':
+        nextCommand.antIds.forEach(antId => {
+          this.assignTask(antId, 'guard');
+        });
+        break;
+        
+      case 'dig':
+        nextCommand.antIds.forEach(antId => {
+          this.assignTask(antId, 'dig');
         });
         break;
       
