@@ -48,6 +48,65 @@ export function createImprovedUI(): string {
         </div>
       </div>
       
+      <!-- Colony Status Dashboard -->
+      <div id="colonyDashboard" class="colony-dashboard">
+        <div class="dashboard-header">
+          <span>🏰 Colony Status</span>
+          <button id="toggleDashboard" class="dashboard-toggle">◀</button>
+        </div>
+        <div id="dashboardContent" class="dashboard-content">
+          <!-- Phase Indicator -->
+          <div class="phase-indicator">
+            <div class="phase-label">Current Phase:</div>
+            <div id="currentPhase" class="phase-name">Founding</div>
+            <div id="phaseProgress" class="phase-progress">
+              <div id="phaseProgressBar" class="phase-progress-bar"></div>
+            </div>
+          </div>
+          
+          <!-- Setup Checklist -->
+          <div class="setup-checklist">
+            <div class="checklist-header">📋 Setup Tasks</div>
+            <div id="setupTasks" class="task-list">
+              <!-- Tasks will be populated here -->
+            </div>
+          </div>
+          
+          <!-- Colony Health Indicators -->
+          <div class="health-indicators">
+            <div class="indicator" data-status="food">
+              <span class="indicator-icon">🍖</span>
+              <span class="indicator-label">Food</span>
+              <div class="indicator-bar">
+                <div class="indicator-fill food-fill"></div>
+              </div>
+            </div>
+            <div class="indicator" data-status="jelly">
+              <span class="indicator-icon">🍯</span>
+              <span class="indicator-label">Jelly</span>
+              <div class="indicator-bar">
+                <div class="indicator-fill jelly-fill"></div>
+              </div>
+            </div>
+            <div class="indicator" data-status="defense">
+              <span class="indicator-icon">🛡️</span>
+              <span class="indicator-label">Defense</span>
+              <div class="indicator-bar">
+                <div class="indicator-fill defense-fill"></div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Activity Monitor -->
+          <div class="activity-monitor">
+            <div class="monitor-header">⚡ Current Activities</div>
+            <div id="activityList" class="activity-list">
+              <!-- Real-time activities -->
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Left Side Panel: Compact Multi-Function -->
       <div id="leftPanel" class="ui-panel side-panel left">
         <!-- Colony Overview Section -->
@@ -173,6 +232,17 @@ export function createImprovedUI(): string {
             <div id="activeTasksSummary" class="tasks-summary">
               <!-- Will show current task distribution -->
             </div>
+            
+            <!-- Command Queue -->
+            <div class="command-queue-section">
+              <div class="queue-header">
+                <span>📋 Command Queue</span>
+                <button id="clearQueue" class="mini-btn">Clear</button>
+              </div>
+              <div id="commandQueueList" class="queue-list">
+                <!-- Queue items will be shown here -->
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -215,6 +285,26 @@ export function createImprovedUI(): string {
         <div class="info-actions">
           <button id="followUnit" class="info-btn">Follow</button>
           <button id="returnToBase" class="info-btn">Return to Base</button>
+        </div>
+      </div>
+      
+      <!-- Game Over Screen -->
+      <div id="gameOverScreen" class="game-over-screen" style="display: none;">
+        <div class="game-over-content">
+          <h1>Colony Defeated</h1>
+          <div id="gameOverReason" class="game-over-reason"></div>
+          
+          <div class="run-stats">
+            <h3>Run Statistics</h3>
+            <div id="runStats" class="stats-grid">
+              <!-- Stats will be populated here -->
+            </div>
+          </div>
+          
+          <div class="game-over-actions">
+            <button id="newRunBtn" class="primary-btn">Start New Colony</button>
+            <button id="viewStatsBtn" class="secondary-btn">View All Runs</button>
+          </div>
         </div>
       </div>
     </div>

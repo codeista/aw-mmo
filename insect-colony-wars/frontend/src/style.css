@@ -1983,3 +1983,442 @@ body {
 .mini-toggle:hover {
   opacity: 0.8;
 }
+
+/* Command Queue Styles */
+.command-queue-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #999;
+}
+
+.mini-btn {
+  padding: 2px 6px;
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: #999;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mini-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.queue-list {
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+
+.queue-item {
+  padding: 4px 6px;
+  margin-bottom: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.queue-item.executing {
+  border-color: #4CAF50;
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.queue-item-info {
+  flex: 1;
+}
+
+.queue-item-status {
+  font-size: 10px;
+  color: #666;
+}
+
+.queue-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.queue-item-btn {
+  padding: 1px 4px;
+  font-size: 10px;
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+}
+
+.queue-item-btn:hover {
+  color: #fff;
+}
+
+.queue-empty {
+  text-align: center;
+  color: #666;
+  padding: 20px 10px;
+  font-style: italic;
+}
+
+/* Game Over Screen */
+.game-over-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.game-over-content {
+  background: linear-gradient(to bottom, rgba(20, 20, 20, 0.95), rgba(10, 10, 10, 0.95));
+  border: 2px solid rgba(255, 0, 0, 0.5);
+  border-radius: 10px;
+  padding: 40px;
+  max-width: 600px;
+  text-align: center;
+  box-shadow: 0 0 50px rgba(255, 0, 0, 0.3);
+}
+
+.game-over-content h1 {
+  color: #ff4444;
+  font-size: 36px;
+  margin-bottom: 20px;
+  text-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+}
+
+.game-over-reason {
+  color: #ccc;
+  font-size: 18px;
+  margin-bottom: 30px;
+  font-style: italic;
+}
+
+.run-stats {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.run-stats h3 {
+  color: #4CAF50;
+  margin-bottom: 15px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  text-align: left;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+
+.stat-label {
+  color: #999;
+}
+
+.stat-value {
+  color: #fff;
+  font-weight: bold;
+}
+
+.game-over-actions {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+.primary-btn, .secondary-btn {
+  padding: 12px 24px;
+  font-size: 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-weight: bold;
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #4CAF50, #388E3C);
+  color: white;
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+}
+
+.primary-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+.secondary-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+/* Colony Dashboard */
+.colony-dashboard {
+  position: absolute;
+  right: 10px;
+  top: 70px;
+  width: 320px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+  z-index: 999;
+  transition: transform 0.3s ease;
+}
+
+.colony-dashboard.collapsed {
+  transform: translateX(340px);
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 15px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: bold;
+  color: #4CAF50;
+}
+
+.dashboard-toggle {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: all 0.2s;
+}
+
+.dashboard-toggle:hover {
+  color: #fff;
+}
+
+.dashboard-content {
+  padding: 15px;
+}
+
+/* Phase Indicator */
+.phase-indicator {
+  margin-bottom: 20px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+}
+
+.phase-label {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 5px;
+}
+
+.phase-name {
+  font-size: 18px;
+  font-weight: bold;
+  color: #4CAF50;
+  margin-bottom: 8px;
+}
+
+.phase-progress {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.phase-progress-bar {
+  height: 100%;
+  background: linear-gradient(to right, #4CAF50, #66BB6A);
+  width: 0%;
+  transition: width 0.5s ease;
+}
+
+/* Setup Checklist */
+.setup-checklist {
+  margin-bottom: 20px;
+}
+
+.checklist-header {
+  font-size: 14px;
+  font-weight: bold;
+  color: #999;
+  margin-bottom: 10px;
+}
+
+.task-list {
+  font-size: 12px;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.task-item.completed {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.task-item:hover:not(.completed) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.task-checkbox {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #4CAF50;
+}
+
+.task-item.completed .task-checkbox {
+  background: #4CAF50;
+  color: black;
+}
+
+.task-label {
+  flex: 1;
+  color: #ccc;
+}
+
+.task-hint {
+  font-size: 10px;
+  color: #666;
+  margin-left: 24px;
+  margin-top: 2px;
+}
+
+/* Health Indicators */
+.health-indicators {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.indicator {
+  text-align: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+}
+
+.indicator-icon {
+  font-size: 20px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.indicator-label {
+  font-size: 10px;
+  color: #999;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.indicator-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.indicator-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.food-fill {
+  background: #FFA726;
+  width: 50%;
+}
+
+.jelly-fill {
+  background: #FFD54F;
+  width: 30%;
+}
+
+.defense-fill {
+  background: #66BB6A;
+  width: 20%;
+}
+
+/* Activity Monitor */
+.activity-monitor {
+  margin-top: 20px;
+}
+
+.monitor-header {
+  font-size: 12px;
+  font-weight: bold;
+  color: #999;
+  margin-bottom: 8px;
+}
+
+.activity-list {
+  max-height: 100px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+
+.activity-item {
+  padding: 4px 6px;
+  margin-bottom: 2px;
+  color: #999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-timestamp {
+  color: #666;
+  font-size: 10px;
+}
+
+.activity-icon {
+  font-size: 12px;
+}

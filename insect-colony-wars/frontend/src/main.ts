@@ -2800,6 +2800,17 @@ class InsectColonyWarsGame {
   private spawnPredators: boolean = true;
   private spawnPrey: boolean = true;
   private currentAntTypeFilter: string = 'all';
+  private gameStartTime: number = 0;
+  private isGameOver: boolean = false;
+  private runStats: any = {
+    duration: 0,
+    queensProduced: 0,
+    antsSpawned: 0,
+    enemiesKilled: 0,
+    resourcesGathered: 0,
+    chambersBuilt: 0,
+    maxPopulation: 0
+  };
   private placementPreviewX: number = 0;
   private placementPreviewY: number = 0;
   private autoSpawnMode: boolean = true; // Disable manual spawn selection by default
@@ -2851,6 +2862,32 @@ class InsectColonyWarsGame {
         this.viewport.clearSelection();
       }
       
+      // Check for queen death
+      const hasQueen = ants.some(ant => ant.ant_type === AntType.Queen && ant.colony_id === this.currentColony?.id);
+      if (this.currentColony && !hasQueen && !this.isGameOver) {
+        // Kill all colony ants when queen dies
+        const colonyAnts = ants.filter(ant => ant.colony_id === this.currentColony?.id);
+        if (colonyAnts.length > 0) {
+          this.logActivity('💀', 'Colony collapses without queen!');
+          
+          // Kill all remaining ants
+          colonyAnts.forEach(ant => {
+            this.service.call('kill_ant', { ant_id: ant.id });
+          });
+        }
+        
+        this.triggerGameOver('Your queen has died - the colony collapsed');
+      }
+      
+      // Track new ants
+      ants.forEach(ant => {
+        const existing = this.ants.get(ant.id);
+        if (!existing && ant.colony_id === this.currentColony?.id) {
+          this.logActivity('🐜', `${ant.ant_type} hatched`);
+          this.runStats.antsSpawned++;
+        }
+      });
+      
       this.ants.clear();
       ants.forEach(ant => this.ants.set(ant.id, ant));
       this.updateAntList();
@@ -2858,11 +2895,28 @@ class InsectColonyWarsGame {
     });
 
     service.on('Chamber', (chambers: Chamber[]) => {
+      // Track new chambers
+      chambers.forEach(chamber => {
+        const existing = this.chambers.get(chamber.id);
+        if (!existing && chamber.colony_id === this.currentColony?.id) {
+          this.logActivity('🏗️', `Built ${chamber.chamber_type}`);
+          this.runStats.chambersBuilt++;
+        }
+      });
+      
       this.chambers.clear();
       chambers.forEach(chamber => this.chambers.set(chamber.id, chamber));
     });
 
     service.on('ResourceNode', (resources: ResourceNode[]) => {
+      // Track newly discovered resources
+      resources.forEach(resource => {
+        const existing = this.resources.get(resource.id);
+        if (!existing?.discovered && resource.discovered) {
+          this.logActivity('🔍', `Found ${resource.resource_type}`);
+        }
+      });
+      
       this.resources.clear();
       resources.forEach(resource => this.resources.set(resource.id, resource));
     });
@@ -2955,6 +3009,12 @@ class InsectColonyWarsGame {
         e.preventDefault();
         this.debugMode = !this.debugMode;
         console.log('Debug mode:', this.debugMode);
+      } else if (e.key === 'g' && e.shiftKey && e.ctrlKey) {
+        // Debug: Trigger game over
+        e.preventDefault();
+        if (this.currentColony && !this.isGameOver) {
+          this.triggerGameOver('Manual game over (debug)');
+        }
       } else if (e.key === 'l' && e.shiftKey) {
         // Toggle verbose logging
         e.preventDefault();
@@ -2980,6 +3040,9 @@ class InsectColonyWarsGame {
     
     // Setup spawn toggles
     this.setupSpawnToggles();
+    
+    // Setup colony dashboard
+    this.setupColonyDashboard();
 
     // Setup event listeners
     document.getElementById('createColonyBtn')?.addEventListener('click', () => {
@@ -3044,11 +3107,15 @@ class InsectColonyWarsGame {
 
     // Chat removed in new UI design
     
-    document.getElementById('toggleAI')?.addEventListener('click', () => {
-      if (this.currentColony) {
-        this.service.call('toggle_colony_ai', { colony_id: this.currentColony.id });
-      }
-    });
+    const aiToggle = document.getElementById('toggleAI');
+    if (aiToggle) {
+      aiToggle.addEventListener('click', async () => {
+        if (this.currentColony) {
+          await this.service.call('toggle_colony_ai', { colony_id: this.currentColony.id });
+          // Update button state will happen when colony update is received
+        }
+      });
+    }
 
     document.getElementById('autoSpawnToggle')?.addEventListener('click', () => {
       this.autoSpawnMode = !this.autoSpawnMode;
@@ -3273,6 +3340,14 @@ class InsectColonyWarsGame {
         }
       }
       
+      // Update AI toggle button state
+      const aiToggle = document.getElementById('toggleAI');
+      if (aiToggle && this.currentColony) {
+        const isAIEnabled = this.currentColony.ai_enabled !== false; // Default to true if undefined
+        aiToggle.textContent = isAIEnabled ? 'ON' : 'OFF';
+        aiToggle.classList.toggle('active', isAIEnabled);
+      }
+      
       if (chamberCount) {
         const chambers = Array.from(this.chambers.values()).filter(ch => ch.colony_id === this.currentColony!.id);
         chamberCount.textContent = chambers.length.toString();
@@ -3394,6 +3469,165 @@ class InsectColonyWarsGame {
     render();
   }
 
+  private triggerGameOver(reason: string) {
+    if (this.isGameOver) return;
+    
+    this.isGameOver = true;
+    
+    // Calculate final stats
+    this.runStats.duration = Date.now() - this.gameStartTime;
+    this.runStats.maxPopulation = Math.max(this.runStats.maxPopulation, this.currentColony?.population || 0);
+    
+    // Add dramatic effect for queen death
+    if (reason.includes('queen')) {
+      addAlert('👑💀 The Queen is dead! The colony collapses!', 'danger');
+      
+      // Visual effect - fade out all ants
+      const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
+      if (canvas) {
+        canvas.style.transition = 'opacity 2s';
+        canvas.style.opacity = '0.3';
+      }
+    }
+    
+    // Save run to history
+    this.saveRunToHistory();
+    
+    // Show game over screen
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const gameOverReason = document.getElementById('gameOverReason');
+    const runStatsEl = document.getElementById('runStats');
+    
+    if (gameOverScreen) gameOverScreen.style.display = 'flex';
+    if (gameOverReason) gameOverReason.textContent = reason;
+    
+    if (runStatsEl) {
+      const formatTime = (ms: number) => {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        if (hours > 0) return `${hours}h ${minutes % 60}m`;
+        if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+        return `${seconds}s`;
+      };
+      
+      runStatsEl.innerHTML = `
+        <div class="stat-item">
+          <span class="stat-label">Survival Time:</span>
+          <span class="stat-value">${formatTime(this.runStats.duration)}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Generation:</span>
+          <span class="stat-value">${this.currentColony?.generation || 0}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Queens Produced:</span>
+          <span class="stat-value">${this.runStats.queensProduced}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Max Population:</span>
+          <span class="stat-value">${this.runStats.maxPopulation}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Ants Spawned:</span>
+          <span class="stat-value">${this.runStats.antsSpawned}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Chambers Built:</span>
+          <span class="stat-value">${this.runStats.chambersBuilt}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Resources Gathered:</span>
+          <span class="stat-value">${this.runStats.resourcesGathered}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Enemies Killed:</span>
+          <span class="stat-value">${this.runStats.enemiesKilled}</span>
+        </div>
+      `;
+    }
+    
+    // Setup new run button
+    const newRunBtn = document.getElementById('newRunBtn');
+    if (newRunBtn) {
+      newRunBtn.onclick = () => {
+        this.startNewRun();
+      };
+    }
+    
+    // Setup view stats button
+    const viewStatsBtn = document.getElementById('viewStatsBtn');
+    if (viewStatsBtn) {
+      viewStatsBtn.onclick = () => {
+        this.showRunHistory();
+      };
+    }
+  }
+  
+  private saveRunToHistory() {
+    const history = JSON.parse(localStorage.getItem('colonyRunHistory') || '[]');
+    history.push({
+      date: new Date().toISOString(),
+      ...this.runStats,
+      generation: this.currentColony?.generation || 0
+    });
+    
+    // Keep only last 100 runs
+    if (history.length > 100) {
+      history.shift();
+    }
+    
+    localStorage.setItem('colonyRunHistory', JSON.stringify(history));
+  }
+  
+  private startNewRun() {
+    // Clear all game state
+    localStorage.removeItem('mock-game-state');
+    localStorage.removeItem('mock-sync-state');
+    
+    // Reset game
+    this.isGameOver = false;
+    this.currentColony = null;
+    this.gameStartTime = Date.now();
+    this.runStats = {
+      duration: 0,
+      queensProduced: 0,
+      antsSpawned: 0,
+      enemiesKilled: 0,
+      resourcesGathered: 0,
+      chambersBuilt: 0,
+      maxPopulation: 0
+    };
+    
+    // Clear all entities
+    this.ants.clear();
+    this.chambers.clear();
+    this.resources.clear();
+    this.predators.clear();
+    this.prey.clear();
+    this.larvae.clear();
+    
+    // Hide game over screen
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    if (gameOverScreen) gameOverScreen.style.display = 'none';
+    
+    // Reset canvas opacity
+    const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
+    if (canvas) {
+      canvas.style.opacity = '1';
+    }
+    
+    // Reload the page for a fresh start
+    location.reload();
+  }
+  
+  private showRunHistory() {
+    const history = JSON.parse(localStorage.getItem('colonyRunHistory') || '[]');
+    console.log('Run History:', history);
+    // TODO: Create a proper UI for viewing run history
+    alert(`You have ${history.length} previous runs. Check console for details.`);
+  }
+
   async createColony() {
     const username = prompt('Enter your username:');
     if (!username) return;
@@ -3407,6 +3641,10 @@ class InsectColonyWarsGame {
     
     // Focus camera on new colony
     this.viewport.focusOnPosition(x, y, -10);
+    
+    // Start tracking the run
+    this.gameStartTime = Date.now();
+    this.isGameOver = false;
   }
 
   async spawnAnt(antType: AntType) {
@@ -4259,8 +4497,23 @@ class InsectColonyWarsGame {
         predatorToggle.classList.toggle('active', this.spawnPredators);
         console.log('Predator spawning:', this.spawnPredators ? 'enabled' : 'disabled');
         
+        // Kill all predators when disabled
+        if (!this.spawnPredators) {
+          const predatorIds = Array.from(this.predators.keys());
+          predatorIds.forEach(id => {
+            this.service.call('kill_predator', { predator_id: id });
+          });
+          this.logActivity('🚫', 'All predators removed');
+          addAlert('All predators have been removed', 'info');
+        }
+        
         // Store preference
         localStorage.setItem('spawnPredators', this.spawnPredators.toString());
+        
+        // Update mock service
+        if (this.service.setSpawnSettings) {
+          this.service.setSpawnSettings({ spawnPredators: this.spawnPredators });
+        }
       });
       
       // Load saved preference
@@ -4279,8 +4532,23 @@ class InsectColonyWarsGame {
         preyToggle.classList.toggle('active', this.spawnPrey);
         console.log('Prey spawning:', this.spawnPrey ? 'enabled' : 'disabled');
         
+        // Kill all prey when disabled
+        if (!this.spawnPrey) {
+          const preyIds = Array.from(this.prey.keys());
+          preyIds.forEach(id => {
+            this.service.call('kill_prey', { prey_id: id });
+          });
+          this.logActivity('🚫', 'All prey removed');
+          addAlert('All prey have been removed', 'info');
+        }
+        
         // Store preference
         localStorage.setItem('spawnPrey', this.spawnPrey.toString());
+        
+        // Update mock service
+        if (this.service.setSpawnSettings) {
+          this.service.setSpawnSettings({ spawnPrey: this.spawnPrey });
+        }
       });
       
       // Load saved preference
@@ -4291,6 +4559,218 @@ class InsectColonyWarsGame {
         preyToggle.classList.toggle('active', this.spawnPrey);
       }
     }
+    
+    // Set initial spawn settings
+    if (this.service.setSpawnSettings) {
+      this.service.setSpawnSettings({ 
+        spawnPredators: this.spawnPredators,
+        spawnPrey: this.spawnPrey 
+      });
+    }
+  }
+
+  private setupColonyDashboard() {
+    // Toggle dashboard
+    const toggleBtn = document.getElementById('toggleDashboard');
+    const dashboard = document.getElementById('colonyDashboard');
+    
+    if (toggleBtn && dashboard) {
+      toggleBtn.addEventListener('click', () => {
+        dashboard.classList.toggle('collapsed');
+        toggleBtn.textContent = dashboard.classList.contains('collapsed') ? '▶' : '◀';
+      });
+    }
+    
+    // Update dashboard every second
+    setInterval(() => this.updateColonyDashboard(), 1000);
+  }
+  
+  private updateColonyDashboard() {
+    if (!this.currentColony) return;
+    
+    // Define colony phases
+    const getPhase = () => {
+      const workerCount = Array.from(this.ants.values()).filter(a => 
+        a.colony_id === this.currentColony!.id && a.ant_type === AntType.Worker
+      ).length;
+      
+      const soldierCount = Array.from(this.ants.values()).filter(a => 
+        a.colony_id === this.currentColony!.id && a.ant_type === AntType.Soldier
+      ).length;
+      
+      const chambers = Array.from(this.chambers.values()).filter(c => 
+        c.colony_id === this.currentColony!.id
+      );
+      
+      if (workerCount === 0) return 'Founding';
+      if (workerCount < 3) return 'Early Colony';
+      if (soldierCount === 0) return 'Expansion';
+      if (chambers.length < 3) return 'Infrastructure';
+      return 'Established';
+    };
+    
+    // Update phase
+    const phase = getPhase();
+    const phaseEl = document.getElementById('currentPhase');
+    if (phaseEl) phaseEl.textContent = phase;
+    
+    // Update progress bar
+    const progressBar = document.getElementById('phaseProgressBar');
+    if (progressBar) {
+      const progress = {
+        'Founding': 20,
+        'Early Colony': 40,
+        'Expansion': 60,
+        'Infrastructure': 80,
+        'Established': 100
+      };
+      progressBar.style.width = `${progress[phase] || 0}%`;
+    }
+    
+    // Update setup tasks
+    this.updateSetupTasks();
+    
+    // Update health indicators
+    this.updateHealthIndicators();
+    
+    // Update activity monitor
+    this.updateActivityMonitor();
+  }
+  
+  private updateSetupTasks() {
+    const tasksEl = document.getElementById('setupTasks');
+    if (!tasksEl || !this.currentColony) return;
+    
+    const tasks = [
+      {
+        id: 'spawn-workers',
+        label: 'Spawn 3 Workers',
+        hint: 'Feed larvae to create workers',
+        check: () => {
+          const workers = Array.from(this.ants.values()).filter(a => 
+            a.colony_id === this.currentColony!.id && a.ant_type === AntType.Worker
+          ).length;
+          return workers >= 3;
+        }
+      },
+      {
+        id: 'find-resources',
+        label: 'Discover Food Source',
+        hint: 'Send scouts to explore',
+        check: () => {
+          return Array.from(this.resources.values()).some(r => r.discovered);
+        }
+      },
+      {
+        id: 'create-royal',
+        label: 'Create Royal Worker',
+        hint: 'Essential for jelly production',
+        check: () => {
+          return Array.from(this.ants.values()).some(a => 
+            a.colony_id === this.currentColony!.id && a.ant_type === AntType.RoyalWorker
+          );
+        }
+      },
+      {
+        id: 'build-chamber',
+        label: 'Build First Chamber',
+        hint: 'Nursery or Storage recommended',
+        check: () => {
+          const chambers = Array.from(this.chambers.values()).filter(c => 
+            c.colony_id === this.currentColony!.id && c.chamber_type !== ChamberType.Burrow
+          );
+          return chambers.length > 0;
+        }
+      },
+      {
+        id: 'spawn-soldiers',
+        label: 'Create Defense Force',
+        hint: 'Spawn at least 2 soldiers',
+        check: () => {
+          const soldiers = Array.from(this.ants.values()).filter(a => 
+            a.colony_id === this.currentColony!.id && a.ant_type === AntType.Soldier
+          ).length;
+          return soldiers >= 2;
+        }
+      }
+    ];
+    
+    tasksEl.innerHTML = tasks.map(task => {
+      const completed = task.check();
+      return `
+        <div class="task-item ${completed ? 'completed' : ''}" data-task-id="${task.id}">
+          <div class="task-checkbox">${completed ? '✓' : ''}</div>
+          <div>
+            <div class="task-label">${task.label}</div>
+            ${!completed ? `<div class="task-hint">${task.hint}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  private updateHealthIndicators() {
+    if (!this.currentColony) return;
+    
+    // Food indicator
+    const foodFill = document.querySelector('.food-fill') as HTMLElement;
+    if (foodFill) {
+      const foodPercent = Math.min(100, (this.currentColony.food / 100) * 100);
+      foodFill.style.width = `${foodPercent}%`;
+      foodFill.style.background = foodPercent < 20 ? '#f44336' : '#FFA726';
+    }
+    
+    // Jelly indicator
+    const jellyFill = document.querySelector('.jelly-fill') as HTMLElement;
+    if (jellyFill) {
+      const jellyPercent = Math.min(100, (this.currentColony.queen_jelly / 50) * 100);
+      jellyFill.style.width = `${jellyPercent}%`;
+      jellyFill.style.background = jellyPercent < 20 ? '#f44336' : '#FFD54F';
+    }
+    
+    // Defense indicator
+    const defenseFill = document.querySelector('.defense-fill') as HTMLElement;
+    if (defenseFill) {
+      const soldiers = Array.from(this.ants.values()).filter(a => 
+        a.colony_id === this.currentColony!.id && 
+        (a.ant_type === AntType.Soldier || a.ant_type === AntType.Major)
+      ).length;
+      const defensePercent = Math.min(100, (soldiers / 10) * 100);
+      defenseFill.style.width = `${defensePercent}%`;
+      defenseFill.style.background = defensePercent < 20 ? '#f44336' : '#66BB6A';
+    }
+  }
+  
+  private activityLog: Array<{icon: string, text: string, timestamp: number}> = [];
+  
+  private updateActivityMonitor() {
+    const activityList = document.getElementById('activityList');
+    if (!activityList) return;
+    
+    // Keep only recent activities (last 30 seconds)
+    const now = Date.now();
+    this.activityLog = this.activityLog.filter(a => now - a.timestamp < 30000);
+    
+    // Display recent activities
+    activityList.innerHTML = this.activityLog.slice(-5).reverse().map(activity => {
+      const timeAgo = Math.floor((now - activity.timestamp) / 1000);
+      return `
+        <div class="activity-item">
+          <span class="activity-icon">${activity.icon}</span>
+          <span>${activity.text}</span>
+          <span class="activity-timestamp">${timeAgo}s ago</span>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  private logActivity(icon: string, text: string) {
+    this.activityLog.push({
+      icon,
+      text,
+      timestamp: Date.now()
+    });
+    this.updateActivityMonitor();
   }
 
   private setupColonyManagement() {
@@ -4362,6 +4842,13 @@ class InsectColonyWarsGame {
       const alertCount = document.getElementById('alertCount');
       if (alertList) alertList.innerHTML = '';
       if (alertCount) alertCount.textContent = '0';
+    });
+    
+    // Clear queue button
+    const clearQueueBtn = document.getElementById('clearQueue');
+    clearQueueBtn?.addEventListener('click', () => {
+      this.commandQueue = [];
+      this.updateCommandQueue();
     });
 
     // Process command queue periodically
@@ -4494,20 +4981,31 @@ class InsectColonyWarsGame {
     const queueList = document.getElementById('commandQueueList');
     if (!queueList) return;
 
+    if (this.commandQueue.length === 0) {
+      queueList.innerHTML = '<div class="queue-empty">No queued commands</div>';
+      return;
+    }
+
     queueList.innerHTML = this.commandQueue.map(item => {
       const antCount = item.antIds.length;
       const repeatIcon = item.repeat ? '🔁' : '';
+      const statusClass = item.status === 'executing' ? 'executing' : '';
       
       return `
-        <div class="queue-item ${item.priority}-priority">
-          <span>${this.getCommandIcon(item.command)} ${item.command} (${antCount} ants) ${repeatIcon}</span>
-          <button class="remove-btn" data-queue-id="${item.id}">×</button>
+        <div class="queue-item ${statusClass}">
+          <div class="queue-item-info">
+            <div>${this.getCommandIcon(item.command)} ${item.command}</div>
+            <div class="queue-item-status">${antCount} ants ${repeatIcon} [${item.priority}]</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="queue-item-btn" data-queue-id="${item.id}" title="Remove">×</button>
+          </div>
         </div>
       `;
     }).join('');
 
     // Add remove handlers
-    queueList.querySelectorAll('.remove-btn').forEach(btn => {
+    queueList.querySelectorAll('.queue-item-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const queueId = btn.getAttribute('data-queue-id');
         this.commandQueue = this.commandQueue.filter(item => item.id !== queueId);

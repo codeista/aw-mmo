@@ -21,6 +21,10 @@ interface MockData {
 export class MockSpacetimeService {
   public identity: string;
   private listeners: Map<string, ((data: any) => void)[]> = new Map();
+  private spawnSettings = {
+    predators: true,
+    prey: true
+  };
   private data: MockData = {
     Player: [],
     Colony: [],
@@ -220,59 +224,63 @@ export class MockSpacetimeService {
       });
     }
     
-    // Generate prey
-    const numPrey = 10 + Math.floor(Math.random() * 15); // 10-25 prey
-    for (let i = 0; i < numPrey; i++) {
-      const types = ['aphid', 'caterpillar', 'termite'];
-      const type = types[Math.floor(Math.random() * types.length)];
-      
-      const stats = {
-        aphid: { health: 20, speed: 1, food: 30 },
-        caterpillar: { health: 40, speed: 0.5, food: 60 },
-        termite: { health: 30, speed: 1.5, food: 40 }
-      };
-      
-      const stat = stats[type as keyof typeof stats];
-      
-      this.data.Prey.push({
-        id: this.nextId.prey++,
-        prey_type: type,
-        x: (Math.random() - 0.5) * 600,
-        y: (Math.random() - 0.5) * 600,
-        health: stat.health,
-        max_health: stat.health,
-        speed: stat.speed,
-        food_value: stat.food,
-        flee_distance: 30
-      });
+    // Generate prey only if spawn setting allows
+    if (this.spawnSettings.prey) {
+      const numPrey = 10 + Math.floor(Math.random() * 15); // 10-25 prey
+      for (let i = 0; i < numPrey; i++) {
+        const types = ['aphid', 'caterpillar', 'termite'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        
+        const stats = {
+          aphid: { health: 20, speed: 1, food: 30 },
+          caterpillar: { health: 40, speed: 0.5, food: 60 },
+          termite: { health: 30, speed: 1.5, food: 40 }
+        };
+        
+        const stat = stats[type as keyof typeof stats];
+        
+        this.data.Prey.push({
+          id: this.nextId.prey++,
+          prey_type: type,
+          x: (Math.random() - 0.5) * 600,
+          y: (Math.random() - 0.5) * 600,
+          health: stat.health,
+          max_health: stat.health,
+          speed: stat.speed,
+          food_value: stat.food,
+          flee_distance: 30
+        });
+      }
     }
     
-    // Generate predators - start with fewer, will increase over time
-    const numPredators = 3 + Math.floor(Math.random() * 3); // 3-5 predators initially
-    for (let i = 0; i < numPredators; i++) {
-      const types = ['spider', 'bird', 'beetle'];
-      const type = types[Math.floor(Math.random() * types.length)];
-      
-      const stats = {
-        spider: { health: 100, speed: 2, damage: 25 },
-        bird: { health: 80, speed: 4, damage: 30 },
-        beetle: { health: 120, speed: 1.5, damage: 20 }
-      };
-      
-      const stat = stats[type as keyof typeof stats];
-      
-      this.data.Predator.push({
-        id: this.nextId.predator++,
-        predator_type: type,
-        x: (Math.random() - 0.5) * 800,
-        y: (Math.random() - 0.5) * 800,
-        health: stat.health,
-        max_health: stat.health,
-        speed: stat.speed,
-        attack_damage: stat.damage,
-        hunt_radius: 50 + Math.random() * 50,
-        target_ant_id: null
-      });
+    // Generate predators only if spawn setting allows
+    if (this.spawnSettings.predators) {
+      const numPredators = 3 + Math.floor(Math.random() * 3); // 3-5 predators initially
+      for (let i = 0; i < numPredators; i++) {
+        const types = ['spider', 'bird', 'beetle'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        
+        const stats = {
+          spider: { health: 100, speed: 2, damage: 25 },
+          bird: { health: 80, speed: 4, damage: 30 },
+          beetle: { health: 120, speed: 1.5, damage: 20 }
+        };
+        
+        const stat = stats[type as keyof typeof stats];
+        
+        this.data.Predator.push({
+          id: this.nextId.predator++,
+          predator_type: type,
+          x: (Math.random() - 0.5) * 800,
+          y: (Math.random() - 0.5) * 800,
+          health: stat.health,
+          max_health: stat.health,
+          speed: stat.speed,
+          attack_damage: stat.damage,
+          hunt_radius: 50 + Math.random() * 50,
+          target_ant_id: null
+        });
+      }
     }
   }
   
@@ -579,6 +587,15 @@ export class MockSpacetimeService {
         break;
       case 'nuptial_flight':
         this.nuptialFlight(args.queen_id);
+        break;
+      case 'kill_predator':
+        this.killPredator(args.predator_id);
+        break;
+      case 'kill_prey':
+        this.killPrey(args.prey_id);
+        break;
+      case 'set_spawn_settings':
+        this.setSpawnSettings(args.spawn_predators, args.spawn_prey);
         break;
     }
     
@@ -1507,6 +1524,27 @@ export class MockSpacetimeService {
         queenTrait
       );
     }, 1000);
+  }
+  
+  private killPredator(predatorId: number) {
+    // Remove the predator from the game
+    this.data.Predator = this.data.Predator.filter(p => p.id !== predatorId);
+    this.emit('Predator', this.data.Predator);
+    console.log(`🔫 Killed predator ${predatorId}`);
+  }
+  
+  private killPrey(preyId: number) {
+    // Remove the prey from the game
+    this.data.Prey = this.data.Prey.filter(p => p.id !== preyId);
+    this.emit('Prey', this.data.Prey);
+    console.log(`🔫 Killed prey ${preyId}`);
+  }
+  
+  private setSpawnSettings(spawnPredators: boolean, spawnPrey: boolean) {
+    // Update spawn settings
+    this.spawnSettings.predators = spawnPredators;
+    this.spawnSettings.prey = spawnPrey;
+    console.log(`🎮 Spawn settings updated - Predators: ${spawnPredators}, Prey: ${spawnPrey}`);
   }
   
   private setWorkerToGather(workerId: number) {
@@ -2700,8 +2738,10 @@ export class MockSpacetimeService {
         coloniesChanged = true;
       }
       
-      // Enhanced Colony AI - Always active for automated gameplay
-      colony.ai_enabled = true;
+      // Enhanced Colony AI - Only run if enabled
+      if (colony.ai_enabled === undefined) {
+        colony.ai_enabled = true; // Default to true for new colonies
+      }
       
       const colonyAnts = this.data.Ant.filter(a => a.colony_id === colony.id);
       const workers = colonyAnts.filter(a => a.ant_type === AntType.Worker);
@@ -2709,6 +2749,11 @@ export class MockSpacetimeService {
       const soldiers = colonyAnts.filter(a => a.ant_type === AntType.Soldier);
       const royalWorkers = colonyAnts.filter(a => a.ant_type === AntType.RoyalWorker);
       const queen = colonyAnts.find(a => a.ant_type === AntType.Queen);
+      
+      // Skip AI logic if disabled
+      if (!colony.ai_enabled) {
+        continue;
+      }
       
       // Check for general retreat order
       if ((colony as any).general_retreat) {
