@@ -1,7 +1,19 @@
 import './style.css';
-import { createImprovedUI, updateThreatLevel } from './ui-redesign';
-// Import alert and unit functions - will be integrated later
-import { addAlert, updateUnitBreakdown } from './ui-redesign';
+import { createImprovedUI, updateThreatLevel, addAlert, updateUnitBreakdown } from './ui-redesign';
+
+// Command Queue Interface
+interface CommandQueueItem {
+  id: string;
+  antIds: number[];
+  command: string;
+  targetX?: number;
+  targetY?: number;
+  targetZ?: number;
+  priority: 'low' | 'normal' | 'high';
+  repeat: boolean;
+  status: 'pending' | 'executing' | 'completed';
+  createdAt: number;
+}
 
 // Types matching the backend
 export enum AntType {
@@ -130,7 +142,7 @@ interface Chamber {
   capacity: number;
 }
 
-interface ResourceNode {
+export interface ResourceNode {
   id: number;
   resource_type: ResourceType;
   x: number;
@@ -891,6 +903,31 @@ class UndergroundViewport {
       this.ctx.fillStyle = healthPercent > 0.3 ? 'green' : 'yellow';
       this.ctx.fillRect(x - barWidth / 2, y - size / 2 - 10, barWidth * healthPercent, barHeight);
       
+      // Draw energy bar (hunger indicator)
+      const energy = (ant as any).energy || 100;
+      const energyPercent = energy / 100;
+      const energyBarY = y - size / 2 - 16; // Place above health bar
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      this.ctx.fillRect(x - barWidth / 2, energyBarY, barWidth, barHeight);
+      
+      // Color based on energy level
+      if (energyPercent > 0.5) {
+        this.ctx.fillStyle = '#2196F3'; // Blue when well-fed
+      } else if (energyPercent > 0.25) {
+        this.ctx.fillStyle = '#FF9800'; // Orange when hungry
+      } else {
+        this.ctx.fillStyle = '#F44336'; // Red when starving
+      }
+      this.ctx.fillRect(x - barWidth / 2, energyBarY, barWidth * energyPercent, barHeight);
+      
+      // Draw hunger warning icon if energy < 25%
+      if (energyPercent <= 0.25 && energyPercent > 0) {
+        this.ctx.fillStyle = '#F44336';
+        this.ctx.font = `${10 * this.zoom}px Arial`;
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('!', x + size / 2 + 5, y - size / 2);
+      }
+      
       // Draw wounded indicator
       if ((ant as any).wounded) {
         this.ctx.save();
@@ -1125,9 +1162,6 @@ class UndergroundViewport {
       case ChamberType.Barracks:
         glowColor = 'rgba(220, 20, 60, 0.3)'; // Crimson glow
         break;
-      case ChamberType.RoyalChamber:
-        glowColor = 'rgba(255, 20, 147, 0.4)'; // Deep pink glow
-        break;
     }
     
     // Chamber interior with gradient for depth
@@ -1166,9 +1200,6 @@ class UndergroundViewport {
         break;
       case ChamberType.Barracks:
         icon = '⚔️';
-        break;
-      case ChamberType.RoyalChamber:
-        icon = '👸';
         break;
       default:
         icon = chamber.chamber_type[0];
@@ -2762,6 +2793,13 @@ class InsectColonyWarsGame {
   private huntMode: boolean = false;
   private digMode: boolean = false;
   private placementMode: boolean = false;
+  
+  // Command Queue System
+  private commandQueue: CommandQueueItem[] = [];
+  private selectedAntsInPanel: Set<number> = new Set();
+  private spawnPredators: boolean = true;
+  private spawnPrey: boolean = true;
+  private currentAntTypeFilter: string = 'all';
   private placementPreviewX: number = 0;
   private placementPreviewY: number = 0;
   private autoSpawnMode: boolean = true; // Disable manual spawn selection by default
@@ -2815,6 +2853,7 @@ class InsectColonyWarsGame {
       
       this.ants.clear();
       ants.forEach(ant => this.ants.set(ant.id, ant));
+      this.updateAntList();
       this.updateUnitPanel();
     });
 
@@ -2895,6 +2934,9 @@ class InsectColonyWarsGame {
         this.selectedAntIds = [];
         this.viewport.clearSelection();
         this.updateUI();
+        // Hide unit info window
+        const infoWindow = document.getElementById('unitInfoWindow');
+        if (infoWindow) infoWindow.style.display = 'none';
       } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
         // Select all units
         e.preventDefault();
@@ -2932,6 +2974,12 @@ class InsectColonyWarsGame {
     
     const app = document.getElementById('app')!;
     app.innerHTML = createImprovedUI();
+
+    // Setup colony management panel
+    this.setupColonyManagement();
+    
+    // Setup spawn toggles
+    this.setupSpawnToggles();
 
     // Setup event listeners
     document.getElementById('createColonyBtn')?.addEventListener('click', () => {
@@ -3171,50 +3219,82 @@ class InsectColonyWarsGame {
       if (queensProducedEl) queensProducedEl.textContent = this.currentPlayer.queens_produced?.toString() || '0';
     }
     
-    // Auto spawn UI removed in new design
-    
     // Update threat monitoring
     const predators = this.service?.data?.Predator || [];
-    const birds = predators.filter(p => p.predator_type === 'bird').length;
-    const spiders = predators.filter(p => p.predator_type === 'spider').length;
-    const beetles = predators.filter(p => p.predator_type === 'beetle').length;
-    
-    const birdCountEl = document.getElementById('birdCount');
-    const spiderCountEl = document.getElementById('spiderCount');
-    const beetleCountEl = document.getElementById('beetleCount');
-    
-    if (birdCountEl) birdCountEl.textContent = birds.toString();
-    if (spiderCountEl) spiderCountEl.textContent = spiders.toString();
-    if (beetleCountEl) beetleCountEl.textContent = beetles.toString();
-    
-    updateThreatLevel(birds + spiders + beetles);
+    const threats = predators.length;
+    updateThreatLevel(threats);
 
     if (this.currentColony) {
-      const traitDisplay = this.currentColony.queen_trait ? ` [${this.currentColony.queen_trait}]` : '';
-      // Colony stats handled by new UI elements
-      const foodEl = document.getElementById('food');
-      const waterEl = document.getElementById('water');
-      const mineralsEl = document.getElementById('minerals');
-      const larvaeEl = document.getElementById('larvae');
-      const queenJellyEl = document.getElementById('queenJelly');
-      const populationEl = document.getElementById('population');
+      // Update colony info
+      const colonyIdEl = document.getElementById('colonyId');
+      const colonyTraitEl = document.getElementById('colonyTrait');
+      
+      if (colonyIdEl) colonyIdEl.textContent = this.currentColony.id.toString();
+      if (colonyTraitEl && this.currentColony.queen_trait) {
+        colonyTraitEl.textContent = this.currentColony.queen_trait;
+        colonyTraitEl.style.display = 'inline-block';
+      }
+      
+      // Update compact resources
+      const foodEl = document.getElementById('foodAmount');
+      const waterEl = document.getElementById('waterAmount');
+      const mineralsEl = document.getElementById('mineralsAmount');
+      const jellyEl = document.getElementById('jellyAmount');
+      const larvaeEl = document.getElementById('larvaeAmount');
+      const popEl = document.getElementById('populationAmount');
+      const popCapEl = document.getElementById('populationCapacity');
       
       if (foodEl) foodEl.textContent = Math.floor(this.currentColony.food).toString();
-      if (waterEl) waterEl.textContent = Math.floor(this.currentColony.water || 0).toString();
+      if (waterEl) waterEl.textContent = Math.floor(this.currentColony.water).toString();
       if (mineralsEl) mineralsEl.textContent = Math.floor(this.currentColony.minerals).toString();
+      if (jellyEl) jellyEl.textContent = Math.floor(this.currentColony.queen_jelly).toString();
       if (larvaeEl) larvaeEl.textContent = this.currentColony.larvae.toString();
-      if (queenJellyEl) queenJellyEl.textContent = Math.floor(this.currentColony.queen_jelly || 0).toString();
-      if (populationEl) populationEl.textContent = this.currentColony.population.toString();
+      if (popEl) popEl.textContent = this.currentColony.population.toString();
+      if (popCapEl) popCapEl.textContent = (this.currentColony as any).population_capacity?.toString() || '20';
       
-      // Calculate population capacity
-      if (this.service && this.service.calculateColonyCapacity) {
-        const capacity = this.service.calculateColonyCapacity(this.currentColony.id);
-        const used = this.service.calculateColonyPopulation(this.currentColony.id);
-        const popCapacityEl = document.getElementById('popCapacity');
-        const populationEl2 = document.getElementById('population');
-        if (popCapacityEl) popCapacityEl.textContent = capacity.toString();
-        if (populationEl2) populationEl2.textContent = used.toString();
+      // Update colony overview
+      const queenStatus = document.getElementById('queenStatus');
+      const chamberCount = document.getElementById('chamberCount');
+      const queen = this.currentColony.queen_id ? this.ants.get(this.currentColony.queen_id) : null;
+      
+      if (queenStatus) {
+        if (queen) {
+          // Calculate queen energy from last_fed_at
+          const now = Date.now();
+          const timeSinceFeeding = now - queen.last_fed_at;
+          const minutesSinceFeeding = timeSinceFeeding / 60000;
+          const energy = Math.max(0, 100 - (minutesSinceFeeding / 20 * 100));
+          
+          queenStatus.textContent = energy > 50 ? 'Healthy' : energy > 25 ? 'Hungry' : 'Starving';
+          queenStatus.className = energy > 50 ? 'threat-safe' : energy > 25 ? 'threat-medium' : 'threat-high';
+        } else {
+          queenStatus.textContent = 'No Queen!';
+          queenStatus.className = 'threat-high';
+        }
       }
+      
+      if (chamberCount) {
+        const chambers = Array.from(this.chambers.values()).filter(ch => ch.colony_id === this.currentColony!.id);
+        chamberCount.textContent = chambers.length.toString();
+      }
+      
+      // Update tasks badge
+      const tasksBadge = document.getElementById('tasksBadge');
+      if (tasksBadge) {
+        const activeAnts = Array.from(this.ants.values()).filter(ant => 
+          ant.colony_id === this.currentColony!.id && ant.task !== TaskType.Idle
+        );
+        const selectedCount = this.selectedAntIds.length;
+        
+        if (selectedCount > 0) {
+          tasksBadge.textContent = `${selectedCount} selected`;
+        } else {
+          tasksBadge.textContent = `${activeAnts.length} active`;
+        }
+      }
+      
+      // Resources are now updated in the compact display above
+      // No need for duplicate updates
       
       // Update AI status
       const aiStatus = document.getElementById('aiStatus');
@@ -3522,7 +3602,7 @@ class InsectColonyWarsGame {
             ant_ids: [antId],
             target_x: closestPrey.x,
             target_y: closestPrey.y,
-            target_z: closestPrey.z,
+            target_z: 0, // Prey are on surface
             task_override: 'hunt'
           });
         } else {
@@ -3551,6 +3631,86 @@ class InsectColonyWarsGame {
     this.updateUI();
   }
 
+  private showUnitInfo(ant: Ant) {
+    const infoWindow = document.getElementById('unitInfoWindow');
+    if (!infoWindow) return;
+    
+    // Show the window
+    infoWindow.style.display = 'block';
+    
+    // Update header
+    const typeEl = document.getElementById('unitInfoType');
+    if (typeEl) typeEl.textContent = `${ant.ant_type} Ant`;
+    
+    // Update basic info
+    const idEl = document.getElementById('unitInfoId');
+    if (idEl) idEl.textContent = `#${ant.id}`;
+    
+    const roleEl = document.getElementById('unitInfoRole');
+    if (roleEl) roleEl.textContent = ant.trait_type || ant.ant_type;
+    
+    // Update energy
+    const now = Date.now();
+    const timeSinceFeeding = now - ant.last_fed_at;
+    const minutesSinceFeeding = timeSinceFeeding / (60 * 1000);
+    const energyDrainMultiplier = ant.z >= 0 ? 1.5 : 1.0;
+    const effectiveMinutes = minutesSinceFeeding * energyDrainMultiplier;
+    const energy = Math.max(0, 100 - (effectiveMinutes / 20 * 100));
+    
+    const energyFill = document.getElementById('unitEnergyFill') as HTMLElement;
+    const energyText = document.getElementById('unitEnergyText');
+    if (energyFill) energyFill.style.width = `${energy}%`;
+    if (energyText) energyText.textContent = `${Math.round(energy)}%`;
+    
+    // Update location
+    const locationEl = document.getElementById('unitInfoLocation');
+    if (locationEl) locationEl.textContent = `(${Math.round(ant.x)}, ${Math.round(ant.y)}, ${ant.z})`;
+    
+    // Update task
+    const taskEl = document.getElementById('unitInfoTask');
+    if (taskEl) taskEl.textContent = ant.task || 'Idle';
+    
+    // Update carrying
+    const carryingEl = document.getElementById('unitInfoCarrying');
+    if (carryingEl) {
+      if (ant.resource_carried && ant.resource_carried > 0) {
+        carryingEl.textContent = `${ant.resource_carried} Food`;
+      } else {
+        carryingEl.textContent = 'Nothing';
+      }
+    }
+    
+    // Setup close button
+    const closeBtn = document.getElementById('closeUnitInfo');
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        infoWindow.style.display = 'none';
+      };
+    }
+    
+    // Setup action buttons
+    const followBtn = document.getElementById('followUnit');
+    if (followBtn) {
+      followBtn.onclick = () => {
+        this.viewport.focusOnPosition(ant.x, ant.y, ant.z);
+      };
+    }
+    
+    const returnBtn = document.getElementById('returnToBase');
+    if (returnBtn) {
+      returnBtn.onclick = async () => {
+        await this.service.call('command_ants', {
+          ant_ids: [ant.id],
+          target_x: 0,
+          target_y: 0,
+          target_z: -10,
+          task_override: 'return'
+        });
+        this.updateUI();
+      };
+    }
+  }
+
   handleObjectClick(clickedObject: { type: string, object: any }) {
     const { type, object } = clickedObject;
     
@@ -3573,6 +3733,7 @@ class InsectColonyWarsGame {
           this.selectedAntIds = [ant.id];
           this.viewport.selectAnts(this.selectedAntIds);
           console.log(`✅ Selected ${ant.ant_type} #${ant.id}`);
+          this.showUnitInfo(ant);
         } else {
           // Show info for enemy ant
           const ownerName = colony ? `Colony #${colony.id}` : 'Unknown';
@@ -3868,7 +4029,7 @@ class InsectColonyWarsGame {
     
     // Add event listeners
     unitList.querySelectorAll('.unit-group-header').forEach(header => {
-      header.addEventListener('click', (e) => {
+      header.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         const group = (e.currentTarget as HTMLElement).parentElement!;
         const wasExpanded = group.classList.contains('expanded');
@@ -3890,7 +4051,7 @@ class InsectColonyWarsGame {
     });
     
     unitList.querySelectorAll('.unit-item').forEach(item => {
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         const antId = parseInt((e.currentTarget as HTMLElement).dataset.id!);
         const ant = this.ants.get(antId);
@@ -3909,6 +4070,8 @@ class InsectColonyWarsGame {
           this.selectedAntIds = [antId];
           // Focus camera on ant
           this.viewport.focusOnPosition(ant.x, ant.y, ant.z);
+          // Show unit info window
+          this.showUnitInfo(ant);
         }
         
         this.viewport.selectAnts(this.selectedAntIds);
@@ -4083,6 +4246,417 @@ class InsectColonyWarsGame {
     });
     console.groupEnd();
   }
+
+  // Colony Management Methods
+  private setupSpawnToggles() {
+    const predatorToggle = document.getElementById('togglePredators');
+    const preyToggle = document.getElementById('togglePrey');
+    
+    if (predatorToggle) {
+      predatorToggle.addEventListener('click', () => {
+        this.spawnPredators = !this.spawnPredators;
+        predatorToggle.textContent = this.spawnPredators ? 'ON' : 'OFF';
+        predatorToggle.classList.toggle('active', this.spawnPredators);
+        console.log('Predator spawning:', this.spawnPredators ? 'enabled' : 'disabled');
+        
+        // Store preference
+        localStorage.setItem('spawnPredators', this.spawnPredators.toString());
+      });
+      
+      // Load saved preference
+      const saved = localStorage.getItem('spawnPredators');
+      if (saved !== null) {
+        this.spawnPredators = saved === 'true';
+        predatorToggle.textContent = this.spawnPredators ? 'ON' : 'OFF';
+        predatorToggle.classList.toggle('active', this.spawnPredators);
+      }
+    }
+    
+    if (preyToggle) {
+      preyToggle.addEventListener('click', () => {
+        this.spawnPrey = !this.spawnPrey;
+        preyToggle.textContent = this.spawnPrey ? 'ON' : 'OFF';
+        preyToggle.classList.toggle('active', this.spawnPrey);
+        console.log('Prey spawning:', this.spawnPrey ? 'enabled' : 'disabled');
+        
+        // Store preference
+        localStorage.setItem('spawnPrey', this.spawnPrey.toString());
+      });
+      
+      // Load saved preference
+      const saved = localStorage.getItem('spawnPrey');
+      if (saved !== null) {
+        this.spawnPrey = saved === 'true';
+        preyToggle.textContent = this.spawnPrey ? 'ON' : 'OFF';
+        preyToggle.classList.toggle('active', this.spawnPrey);
+      }
+    }
+  }
+
+  private setupColonyManagement() {
+    // Setup expandable sections
+    const sectionHeaders = document.querySelectorAll('.section-header');
+    sectionHeaders.forEach(header => {
+      header.addEventListener('click', () => {
+        const section = header.getAttribute('data-section');
+        const content = document.getElementById(`${section}Content`);
+        const icon = header.querySelector('.expand-icon');
+        
+        if (content && icon) {
+          if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            content.classList.add('expanded');
+            icon.textContent = '▼';
+            
+            // Update ant list when tasks section is expanded
+            if (section === 'tasks') {
+              this.updateAntList();
+            }
+          } else {
+            content.classList.remove('expanded');
+            content.classList.add('collapsed');
+            icon.textContent = '▶';
+          }
+        }
+      });
+    });
+
+    // Tab switching
+    const tabs = document.querySelectorAll('.ant-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        this.currentAntTypeFilter = tab.getAttribute('data-type') || 'all';
+        this.updateAntList();
+      });
+    });
+
+    // Command buttons
+    const commandButtons = document.querySelectorAll('.cmd-btn');
+    commandButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const command = btn.getAttribute('data-cmd');
+        if (command && this.selectedAntsInPanel.size > 0) {
+          this.queueCommand(command);
+        }
+      });
+    });
+
+    // Build buttons
+    const buildButtons = document.querySelectorAll('.build-btn');
+    buildButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const chamber = btn.getAttribute('data-chamber');
+        if (chamber && this.currentColony) {
+          // TODO: Implement chamber building
+          console.log(`Building ${chamber}...`);
+        }
+      });
+    });
+
+    // Clear alerts on click
+    const alertIcon = document.getElementById('alertIcon');
+    alertIcon?.addEventListener('click', () => {
+      const alertList = document.getElementById('alertList');
+      const alertCount = document.getElementById('alertCount');
+      if (alertList) alertList.innerHTML = '';
+      if (alertCount) alertCount.textContent = '0';
+    });
+
+    // Process command queue periodically
+    setInterval(() => this.processCommandQueue(), 1000);
+    
+    // Update production rates periodically
+    setInterval(() => this.updateProductionRates(), 5000);
+  }
+
+  private updateAntList() {
+    const antList = document.getElementById('antList');
+    if (!antList || !this.currentColony) return;
+
+    const filteredAnts = Array.from(this.ants.values()).filter(ant => {
+      if (ant.colony_id !== this.currentColony!.id) return false;
+      if (this.currentAntTypeFilter === 'all') return true;
+      return ant.ant_type === this.currentAntTypeFilter;
+    });
+    
+    // Sync selectedAntsInPanel with selectedAntIds
+    this.selectedAntsInPanel.clear();
+    this.selectedAntIds.forEach(id => this.selectedAntsInPanel.add(id));
+
+    antList.innerHTML = filteredAnts.map(ant => {
+      // Calculate energy from last_fed_at timestamp
+      const now = Date.now();
+      const timeSinceFeeding = now - ant.last_fed_at;
+      const minutesSinceFeeding = timeSinceFeeding / 60000;
+      const energyDrainMultiplier = ant.z >= 0 ? 1.5 : 1.0;
+      const effectiveMinutes = minutesSinceFeeding * energyDrainMultiplier;
+      const energy = Math.max(0, 100 - (effectiveMinutes / 20 * 100));
+      
+      const energyClass = energy > 50 ? 'high' : energy > 25 ? 'medium' : 'low';
+      const isSelected = this.selectedAntsInPanel.has(ant.id);
+      const trait = ant.trait_type ? `[${ant.trait_type}]` : '';
+      
+      return `
+        <div class="ant-entry ${isSelected ? 'selected' : ''}" data-ant-id="${ant.id}">
+          <div class="ant-info">
+            <span>${this.getAntIcon(ant.ant_type)} #${ant.id}</span>
+            <span class="trait">${trait}</span>
+          </div>
+          <div class="ant-status">
+            <span>${ant.task}</span>
+            <div class="energy-indicator">
+              <div class="energy-bar ${energyClass}" style="width: ${energy}%"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Add click handlers
+    antList.querySelectorAll('.ant-entry').forEach(entry => {
+      entry.addEventListener('click', (e) => {
+        const antId = parseInt(entry.getAttribute('data-ant-id') || '0');
+        const ant = this.ants.get(antId);
+        if (!ant) return;
+        
+        if (e.shiftKey || e.ctrlKey) {
+          // Multi-select
+          if (this.selectedAntsInPanel.has(antId)) {
+            this.selectedAntsInPanel.delete(antId);
+            // Remove from main selection too
+            const index = this.selectedAntIds.indexOf(antId);
+            if (index >= 0) {
+              this.selectedAntIds.splice(index, 1);
+            }
+          } else {
+            this.selectedAntsInPanel.add(antId);
+            this.selectedAntIds.push(antId);
+          }
+        } else {
+          // Single select
+          this.selectedAntsInPanel.clear();
+          this.selectedAntsInPanel.add(antId);
+          this.selectedAntIds = [antId];
+          
+          // Show unit info window
+          this.showUnitInfo(ant);
+          // Focus camera on ant
+          this.viewport.focusOnPosition(ant.x, ant.y, ant.z);
+        }
+        
+        // Update viewport selection
+        this.viewport.selectAnts(this.selectedAntIds);
+        this.updateAntList();
+        this.updateUI();
+      });
+    });
+  }
+
+  private getAntIcon(antType: AntType): string {
+    switch (antType) {
+      case AntType.Queen: return '👑';
+      case AntType.Worker: return '⚒️';
+      case AntType.Scout: return '🔍';
+      case AntType.Soldier: return '⚔️';
+      case AntType.Major: return '🛡️';
+      case AntType.RoyalWorker: return '🍯';
+      case AntType.YoungQueen: return '👸';
+      default: return '🐜';
+    }
+  }
+
+  private queueCommand(command: string) {
+    const repeat = (document.getElementById('repeatCommand') as HTMLInputElement)?.checked || false;
+    const priority = (document.getElementById('commandPriority') as HTMLSelectElement)?.value as 'low' | 'normal' | 'high' || 'normal';
+    
+    const queueItem: CommandQueueItem = {
+      id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      antIds: Array.from(this.selectedAntsInPanel),
+      command,
+      priority,
+      repeat,
+      status: 'pending',
+      createdAt: Date.now()
+    };
+
+    this.commandQueue.push(queueItem);
+    this.commandQueue.sort((a, b) => {
+      const priorityOrder = { high: 0, normal: 1, low: 2 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
+
+    this.updateCommandQueue();
+  }
+
+  private updateCommandQueue() {
+    const queueList = document.getElementById('commandQueueList');
+    if (!queueList) return;
+
+    queueList.innerHTML = this.commandQueue.map(item => {
+      const antCount = item.antIds.length;
+      const repeatIcon = item.repeat ? '🔁' : '';
+      
+      return `
+        <div class="queue-item ${item.priority}-priority">
+          <span>${this.getCommandIcon(item.command)} ${item.command} (${antCount} ants) ${repeatIcon}</span>
+          <button class="remove-btn" data-queue-id="${item.id}">×</button>
+        </div>
+      `;
+    }).join('');
+
+    // Add remove handlers
+    queueList.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const queueId = btn.getAttribute('data-queue-id');
+        this.commandQueue = this.commandQueue.filter(item => item.id !== queueId);
+        this.updateCommandQueue();
+      });
+    });
+  }
+
+  private getCommandIcon(command: string): string {
+    const icons: Record<string, string> = {
+      gather: '🌾',
+      scout: '🔍',
+      guard: '🛡️',
+      dig: '⛏️',
+      return: '🏠',
+      attack: '⚔️'
+    };
+    return icons[command] || '📋';
+  }
+
+  private processCommandQueue() {
+    if (!this.service || this.commandQueue.length === 0) return;
+
+    // Find next pending command
+    const nextCommand = this.commandQueue.find(cmd => cmd.status === 'pending');
+    if (!nextCommand) return;
+
+    // Mark as executing
+    nextCommand.status = 'executing';
+
+    try {
+      // Execute command based on type
+      switch (nextCommand.command) {
+      case 'gather':
+        this.service.call('hive_command', {
+          colony_id: this.currentColony?.id,
+          command: 'gather'
+        });
+        break;
+      
+      case 'return':
+        nextCommand.antIds.forEach(antId => {
+          const ant = this.ants.get(antId);
+          if (ant) {
+            const chambers = Array.from(this.chambers.values())
+              .filter(ch => ch.colony_id === ant.colony_id);
+            const target = chambers.find(ch => ch.chamber_type === ChamberType.ThroneRoom) || chambers[0];
+            
+            if (target) {
+              this.service.call('command_ants', {
+                ant_ids: [antId],
+                target_x: target.x,
+                target_y: target.y,
+                target_z: target.z
+              });
+            }
+          }
+        });
+        break;
+      
+      case 'scout':
+        nextCommand.antIds.forEach(antId => {
+          const ant = this.ants.get(antId);
+          if (ant) {
+            // Send to random location
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 100 + Math.random() * 200;
+            const targetX = ant.x + Math.cos(angle) * distance;
+            const targetY = ant.y + Math.sin(angle) * distance;
+            
+            this.service.call('command_ants', {
+              ant_ids: [antId],
+              target_x: targetX,
+              target_y: targetY,
+              target_z: 0,
+              task_override: 'scout'
+            });
+          }
+        });
+        break;
+      
+      // Add more command implementations as needed
+      }
+      
+      // Mark as completed
+      nextCommand.status = 'completed';
+      
+      // Handle repeat or remove
+      if (nextCommand.repeat) {
+        nextCommand.status = 'pending';
+        // Move to end of same priority group
+        const samePriority = this.commandQueue.filter(cmd => cmd.priority === nextCommand.priority);
+        const index = samePriority.indexOf(nextCommand);
+        if (index < samePriority.length - 1) {
+          this.commandQueue = this.commandQueue.filter(cmd => cmd.id !== nextCommand.id);
+          this.commandQueue.push(nextCommand);
+        }
+      } else {
+        this.commandQueue = this.commandQueue.filter(cmd => cmd.id !== nextCommand.id);
+      }
+
+      this.updateCommandQueue();
+    } catch (error) {
+      console.error('Command execution failed:', error);
+      // Remove failed command
+      this.commandQueue = this.commandQueue.filter(cmd => cmd.id !== nextCommand.id);
+      this.updateCommandQueue();
+      
+      // Show error to user
+      addAlert(`Command failed: ${nextCommand.command}`, 'danger');
+    }
+  }
+
+  private updateProductionRates() {
+    if (!this.currentColony) return;
+    
+    // Calculate production rates based on active workers
+    const workers = Array.from(this.ants.values()).filter(ant => 
+      ant.colony_id === this.currentColony!.id && 
+      ant.ant_type === AntType.Worker &&
+      ant.task === TaskType.Gathering
+    );
+    
+    const royalWorkers = Array.from(this.ants.values()).filter(ant => 
+      ant.colony_id === this.currentColony!.id && 
+      ant.ant_type === AntType.RoyalWorker
+    );
+    
+    // Estimate production rates (simplified)
+    const foodRate = workers.filter(w => w.carrying_resource === ResourceType.Food).length * 2;
+    const waterRate = workers.filter(w => w.carrying_resource === ResourceType.Water).length * 1.5;
+    const mineralsRate = workers.filter(w => w.carrying_resource === ResourceType.Minerals).length * 1;
+    const jellyRate = royalWorkers.length * 0.5;
+    
+    // Update UI
+    const foodRateEl = document.getElementById('foodRate');
+    const waterRateEl = document.getElementById('waterRate');
+    const mineralsRateEl = document.getElementById('mineralsRate');
+    const jellyRateEl = document.getElementById('jellyRate');
+    const productionBadge = document.getElementById('productionBadge');
+    
+    if (foodRateEl) foodRateEl.textContent = foodRate.toFixed(1);
+    if (waterRateEl) waterRateEl.textContent = waterRate.toFixed(1);
+    if (mineralsRateEl) mineralsRateEl.textContent = mineralsRate.toFixed(1);
+    if (jellyRateEl) jellyRateEl.textContent = jellyRate.toFixed(1);
+    
+    const totalRate = foodRate + waterRate + mineralsRate + jellyRate;
+    if (productionBadge) productionBadge.textContent = `+${totalRate.toFixed(0)}/min`;
+  }
 }
 
 // Initialize game
@@ -4180,7 +4754,7 @@ async function init() {
     console.log('💡 Type showActions() in console for help');
   } catch (error) {
     console.error('❌ Failed to initialize game:', error);
-    console.error('Stack trace:', error.stack);
+    console.error('Stack trace:', (error as Error).stack);
     
     // Show user-friendly error message
     const errorDiv = document.createElement('div');
@@ -4198,7 +4772,7 @@ async function init() {
     `;
     errorDiv.innerHTML = `
       <h3>Failed to initialize game</h3>
-      <p>${error.message}</p>
+      <p>${(error as Error).message}</p>
       <p style="font-size: 12px;">Check console for details</p>
     `;
     document.body.appendChild(errorDiv);

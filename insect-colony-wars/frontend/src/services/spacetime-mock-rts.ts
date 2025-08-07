@@ -1,5 +1,5 @@
 // Mock SpacetimeDB service for RTS development
-import { AntType, ResourceType, ChamberType, TaskType, AntTrait } from '../main';
+import { AntType, ResourceType, ChamberType, TaskType, AntTrait, ResourceNode } from '../main';
 
 interface MockData {
   Player: any[];
@@ -49,7 +49,8 @@ export class MockSpacetimeService {
     obstacle: 1,
     prey: 1,
     predator: 1,
-    larva: 1
+    larva: 1,
+    resource: 1
   };
   private queenDigTracking: Map<number, { startTime: number, x: number, y: number, colonyId: number }> = new Map();
   private gameUpdateInterval: number | null = null;
@@ -708,7 +709,9 @@ export class MockSpacetimeService {
       [AntType.Soldier]: { food: 20, minerals: 0, larvae: 1, jelly: 3 },
       [AntType.Scout]: { food: 15, minerals: 0, larvae: 1, jelly: 2.5 },
       [AntType.Major]: { food: 50, minerals: 10, larvae: 2, jelly: 5 },
-      [AntType.Queen]: { food: 999, minerals: 999, larvae: 999, jelly: 999 } // Can't spawn
+      [AntType.Queen]: { food: 999, minerals: 999, larvae: 999, jelly: 999 }, // Can't spawn
+      [AntType.YoungQueen]: { food: 100, minerals: 100, larvae: 1, jelly: 50 },
+      [AntType.RoyalWorker]: { food: 30, minerals: 0, larvae: 1, jelly: 5 }
     };
     
     const cost = costs[antType];
@@ -727,6 +730,7 @@ export class MockSpacetimeService {
     // Create ant
     const stats = {
       [AntType.Queen]: { health: 200, speed: 0.5, damage: 50 },
+      [AntType.YoungQueen]: { health: 150, speed: 4, damage: 15 },
       [AntType.Worker]: { health: 50, speed: 4, damage: 5 },
       [AntType.RoyalWorker]: { health: 40, speed: 0.5, damage: 0 },
       [AntType.Soldier]: { health: 100, speed: 3, damage: 20 },
@@ -1230,7 +1234,7 @@ export class MockSpacetimeService {
     const chamberId = this.nextId.chamber++;
     const chamber = {
       id: chamberId,
-      colony_id: colonyId,
+      colony_id: colony.id,
       chamber_type: chamberType,
       x,
       y,
@@ -1391,7 +1395,6 @@ export class MockSpacetimeService {
       if (ant.ant_type === AntType.Queen) {
         // Queen stays deep underground in the safest chamber
         const safeRoom = chambers.find(ch => ch.chamber_type === ChamberType.ThroneRoom) || 
-                         chambers.find(ch => ch.chamber_type === ChamberType.RoyalChamber) || 
                          underground;
         ant.target_x = safeRoom.x;
         ant.target_y = safeRoom.y;
@@ -1827,8 +1830,75 @@ export class MockSpacetimeService {
       antsChanged = true;
     }
     
-    // Check for queens completing digging
+    // Update ant energy levels and check for starvation
     const now = Date.now();
+    this.data.Ant.forEach(ant => {
+      const timeSinceFeeding = now - ant.last_fed_at;
+      const minutesSinceFeeding = timeSinceFeeding / 60000; // Convert to minutes
+      
+      // Calculate energy based on time since feeding and location
+      // Surface ants lose energy faster (exposed to elements)
+      const energyDrainMultiplier = ant.z >= 0 ? 1.5 : 1.0; // 50% faster drain on surface
+      const effectiveMinutes = minutesSinceFeeding * energyDrainMultiplier;
+      
+      // Calculate energy percentage (100% at 0 minutes, 0% at 20 minutes)
+      const maxMinutesBeforeStarvation = 20;
+      const energyPercent = Math.max(0, 100 - (effectiveMinutes / maxMinutesBeforeStarvation * 100));
+      
+      // Store energy level on ant for rendering
+      (ant as any).energy = energyPercent;
+      
+      // Check if ant needs to return to base (25% energy)
+      if (energyPercent <= 25 && energyPercent > 0 && ant.z >= 0) {
+        // Only force return if not already returning or in combat
+        if (ant.task !== TaskType.Returning && ant.task !== TaskType.Fighting && ant.task !== TaskType.Entering) {
+          const burrowEntrance = this.data.Chamber.find(ch => 
+            ch.colony_id === ant.colony_id && 
+            ch.z === -1 && 
+            ch.is_entrance
+          );
+          
+          if (burrowEntrance) {
+            // Store current task to resume after feeding
+            (ant as any).task_before_hunger = ant.task;
+            (ant as any).returning_for_food = true;
+            
+            console.log(`🍽️ Ant ${ant.id} (${ant.ant_type}) is hungry! Returning to base (${energyPercent.toFixed(0)}% energy)`);
+            ant.task = TaskType.Entering;
+            ant.target_x = burrowEntrance.x;
+            ant.target_y = burrowEntrance.y;
+            ant.target_z = burrowEntrance.z;
+            antsChanged = true;
+          }
+        }
+      }
+      
+      // Check for starvation (0% energy)
+      if (energyPercent <= 0) {
+        console.log(`💀 Ant ${ant.id} (${ant.ant_type}) starved to death!`);
+        
+        // Remove starved ant
+        this.data.Ant = this.data.Ant.filter(a => a.id !== ant.id);
+        antsChanged = true;
+        
+        // Update colony population
+        const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+        if (colony) {
+          colony.population--;
+          coloniesChanged = true;
+          
+          // Check if this was the queen
+          if (ant.ant_type === AntType.Queen) {
+            console.log(`👑💀 GAME OVER! Queen of colony ${colony.id} has died!`);
+            (colony as any).game_over = true;
+            
+            // TODO: Trigger game over for this colony
+          }
+        }
+      }
+    });
+    
+    // Check for queens completing digging
     this.queenDigTracking.forEach((digInfo, queenId) => {
       const queen = this.data.Ant.find(a => a.id === queenId);
       if (!queen) {
@@ -2182,6 +2252,12 @@ export class MockSpacetimeService {
               delete (ant as any).final_task;
             } else {
               ant.task = TaskType.Idle;
+              
+              // Check if ant was returning for food
+              if ((ant as any).returning_for_food) {
+                console.log(`🍽️ Ant ${ant.id} is back in burrow to feed`);
+                delete (ant as any).returning_for_food;
+              }
             }
             antsChanged = true;
           }
@@ -2536,6 +2612,56 @@ export class MockSpacetimeService {
           resource.amount + resource.regeneration_rate * 0.1
         );
         resourcesChanged = true;
+      }
+    });
+    
+    // Process feeding for idle ants underground
+    this.data.Ant.forEach(ant => {
+      // Check if ant is idle underground and needs feeding
+      if (ant.task === TaskType.Idle && ant.z < -5) {
+        const energy = (ant as any).energy || 100;
+        
+        // Feed ant if energy is below 90% and colony has jelly
+        if (energy < 90) {
+          const colony = this.data.Colony.find(c => c.id === ant.colony_id);
+          if (colony && colony.queen_jelly > 0) {
+            // Calculate jelly needed based on consumption rate
+            const jellyNeeded = ant.jelly_consumption_rate * 0.1; // Feed in small increments
+            
+            if (colony.queen_jelly >= jellyNeeded) {
+              // Consume jelly and reset feeding timer
+              colony.queen_jelly -= jellyNeeded;
+              ant.last_fed_at = Date.now();
+              coloniesChanged = true;
+              
+              console.log(`🍯 Ant ${ant.id} (${ant.ant_type}) fed! Energy restored to 100%`);
+              
+              // Resume previous task if ant was returning for food
+              if ((ant as any).task_before_hunger) {
+                const previousTask = (ant as any).task_before_hunger;
+                delete (ant as any).task_before_hunger;
+                
+                // Resume previous activity
+                if (previousTask === TaskType.Gathering && ant.ant_type === AntType.Worker) {
+                  console.log(`✅ Ant ${ant.id} resuming resource gathering after feeding`);
+                  this.setWorkerToGather(ant.id);
+                } else if (previousTask === TaskType.Exploring && ant.ant_type === AntType.Scout) {
+                  console.log(`✅ Scout ${ant.id} resuming exploration after feeding`);
+                  // Set random exploration target
+                  const angle = Math.random() * Math.PI * 2;
+                  const distance = 50 + Math.random() * 150;
+                  ant.target_x = ant.x + Math.cos(angle) * distance;
+                  ant.target_y = ant.y + Math.sin(angle) * distance;
+                  ant.target_z = 0;
+                  ant.task = TaskType.Exiting;
+                }
+                antsChanged = true;
+              }
+            } else {
+              console.log(`⚠️ Not enough jelly to feed ant ${ant.id}! Colony jelly: ${colony.queen_jelly.toFixed(1)}`);
+            }
+          }
+        }
       }
     });
     
@@ -3237,6 +3363,20 @@ export class MockSpacetimeService {
     return this.data.Chamber.some(ch => 
       ch.colony_id === colonyId && ch.chamber_type === ChamberType.ThroneRoom
     );
+  }
+  
+  private getAntStats(antType: AntType): { health: number; speed: number; damage: number } {
+    const stats = {
+      [AntType.Queen]: { health: 200, speed: 0.5, damage: 50 },
+      [AntType.YoungQueen]: { health: 150, speed: 4, damage: 15 },
+      [AntType.Worker]: { health: 50, speed: 4, damage: 5 },
+      [AntType.RoyalWorker]: { health: 40, speed: 0.5, damage: 0 },
+      [AntType.Soldier]: { health: 100, speed: 3, damage: 20 },
+      [AntType.Scout]: { health: 30, speed: 6, damage: 10 },
+      [AntType.Major]: { health: 150, speed: 2, damage: 30 }
+    };
+    
+    return stats[antType];
   }
   
   disconnect() {

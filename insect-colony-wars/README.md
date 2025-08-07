@@ -20,6 +20,12 @@ Start as a queen ant landing in a dangerous world filled with predators, hostile
 
 ## 🎮 Gameplay Mechanics
 
+### Energy System
+- **Energy Depletion**: Ants lose energy over time (faster on surface)
+- **Auto-Return**: Ants automatically return to burrow when energy < 20%
+- **Recovery**: Ants regain energy when resting in burrows
+- **Death**: Ants die if energy reaches 0
+
 ### Ant Types & Lifecycle
 - **Queen** (200 HP, 0.5 speed): Powerful bite, spawns larvae, builds initial burrow
 - **Young Queen** (100 HP, 2.0 speed): Royal offspring that matures over time then flies away
@@ -162,6 +168,16 @@ npm run dev
 - **Shift+D**: Toggle debug overlay (shows unit influence, resource discovery)
 - **Surface/Underground Buttons**: Switch view layers
 
+### UI Features
+- **Compact Top Bar**: Colony info, resources, and view controls
+- **Expandable Left Panel**: 
+  - Colony Overview with spawn toggles
+  - Production rates display
+  - Construction options
+  - Tasks & Units with ant selection
+- **Unit Info Window**: Detailed ant stats when selected
+- **Command Queue**: Automated task management with priorities
+
 ### Individual Unit Control
 - Select single unit to see task panel
 - Available tasks vary by ant type:
@@ -238,7 +254,10 @@ The game is fully playable with:
 - Dynamic world regeneration on respawn
 - Surface ecosystem with prey and predators
 - Clickable objects for detailed information
-- Compact tabbed UI interface
+- Compact expandable UI with command queue
+- Energy system forcing strategic surface/underground balance
+- Unit info windows with direct control
+- Spawn toggles for predators/prey
 - Debug overlay (Shift+D) showing unit influence
 
 ## 📈 Planned Features
