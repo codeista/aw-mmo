@@ -2752,7 +2752,7 @@ export class MockSpacetimeService {
       
       // Skip AI logic if disabled
       if (!colony.ai_enabled) {
-        continue;
+        return; // Skip this iteration in forEach
       }
       
       // Check for general retreat order
