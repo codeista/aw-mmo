@@ -2788,7 +2788,7 @@ class InsectColonyWarsGame {
   public predators: Map<number, Predator> = new Map();
   public larvae: Map<number, Larva> = new Map();
   public tunnels: Map<number, Tunnel> = new Map();
-  private selectedAntIds: number[] = [];
+  public selectedAntIds: number[] = [];
   private service: any; // Will be SpacetimeService or MockService
   private huntMode: boolean = false;
   private digMode: boolean = false;
@@ -2828,6 +2828,12 @@ class InsectColonyWarsGame {
   async connect(service: any) {
     this.service = service;
     await service.connect();
+    
+    // Initialize spawn settings now that service is connected
+    this.service.call('set_spawn_settings', { 
+      spawn_predators: this.spawnPredators,
+      spawn_prey: this.spawnPrey 
+    });
     
     // Subscribe to tables
     service.on('Player', (players: Player[]) => {
@@ -2912,9 +2918,11 @@ class InsectColonyWarsGame {
       // Track newly discovered resources
       resources.forEach(resource => {
         const existing = this.resources.get(resource.id);
-        if (!existing?.discovered && resource.discovered) {
-          this.logActivity('🔍', `Found ${resource.resource_type}`);
-        }
+        // Check if this resource was just discovered by checking DiscoveredResource table
+        const wasDiscovered = this.currentColony && Array.from(this.discoveredResources.values())
+          .some(dr => dr.colony_id === this.currentColony!.id && dr.resource_id === existing?.id);
+        
+        this.resources.set(resource.id, resource);
       });
       
       this.resources.clear();
@@ -3518,7 +3526,7 @@ class InsectColonyWarsGame {
         </div>
         <div class="stat-item">
           <span class="stat-label">Generation:</span>
-          <span class="stat-value">${this.currentColony?.generation || 0}</span>
+          <span class="stat-value">${this.currentPlayer?.generations_survived || 0}</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">Queens Produced:</span>
@@ -3569,7 +3577,7 @@ class InsectColonyWarsGame {
     history.push({
       date: new Date().toISOString(),
       ...this.runStats,
-      generation: this.currentColony?.generation || 0
+      generation: this.currentPlayer?.generations_survived || 0
     });
     
     // Keep only last 100 runs
@@ -3911,8 +3919,9 @@ class InsectColonyWarsGame {
     // Update carrying
     const carryingEl = document.getElementById('unitInfoCarrying');
     if (carryingEl) {
-      if (ant.resource_carried && ant.resource_carried > 0) {
-        carryingEl.textContent = `${ant.resource_carried} Food`;
+      // Check if ant is carrying resources based on task
+      if (ant.task === TaskType.Returning && ant.ant_type === AntType.Worker) {
+        carryingEl.textContent = 'Food'; // Workers typically carry food when returning
       } else {
         carryingEl.textContent = 'Nothing';
       }
@@ -4267,7 +4276,7 @@ class InsectColonyWarsGame {
     
     // Add event listeners
     unitList.querySelectorAll('.unit-group-header').forEach(header => {
-      header.addEventListener('click', (e: MouseEvent) => {
+      header.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         const group = (e.currentTarget as HTMLElement).parentElement!;
         const wasExpanded = group.classList.contains('expanded');
@@ -4276,7 +4285,7 @@ class InsectColonyWarsGame {
         group.classList.toggle('expanded');
         
         // Double click to select all of this type
-        if (e.detail === 2) {
+        if ((e as any).detail === 2) {
           const type = group.dataset.type as AntType;
           const ants = antsByType.get(type) || [];
           if (ants.length > 0) {
@@ -4289,13 +4298,13 @@ class InsectColonyWarsGame {
     });
     
     unitList.querySelectorAll('.unit-item').forEach(item => {
-      item.addEventListener('click', (e: MouseEvent) => {
+      item.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         const antId = parseInt((e.currentTarget as HTMLElement).dataset.id!);
         const ant = this.ants.get(antId);
         if (!ant) return;
         
-        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        if ((e as MouseEvent).shiftKey || (e as MouseEvent).ctrlKey || (e as MouseEvent).metaKey) {
           // Add/remove from selection
           const index = this.selectedAntIds.indexOf(antId);
           if (index >= 0) {
@@ -4510,11 +4519,13 @@ class InsectColonyWarsGame {
         // Store preference
         localStorage.setItem('spawnPredators', this.spawnPredators.toString());
         
-        // Update mock service spawn settings
-        this.service.call('set_spawn_settings', { 
-          spawn_predators: this.spawnPredators, 
-          spawn_prey: this.spawnPrey 
-        });
+        // Update mock service spawn settings if service is connected
+        if (this.service) {
+          this.service.call('set_spawn_settings', { 
+            spawn_predators: this.spawnPredators, 
+            spawn_prey: this.spawnPrey 
+          });
+        }
       });
       
       // Load saved preference
@@ -4546,11 +4557,13 @@ class InsectColonyWarsGame {
         // Store preference
         localStorage.setItem('spawnPrey', this.spawnPrey.toString());
         
-        // Update mock service spawn settings
-        this.service.call('set_spawn_settings', { 
-          spawn_predators: this.spawnPredators, 
-          spawn_prey: this.spawnPrey 
-        });
+        // Update mock service spawn settings if service is connected
+        if (this.service) {
+          this.service.call('set_spawn_settings', { 
+            spawn_predators: this.spawnPredators, 
+            spawn_prey: this.spawnPrey 
+          });
+        }
       });
       
       // Load saved preference
@@ -4562,11 +4575,8 @@ class InsectColonyWarsGame {
       }
     }
     
-    // Set initial spawn settings
-    this.service.call('set_spawn_settings', { 
-      spawn_predators: this.spawnPredators,
-      spawn_prey: this.spawnPrey 
-    });
+    // Set initial spawn settings after service is connected
+    // This will be called later in connect()
   }
 
   private setupColonyDashboard() {
@@ -4658,7 +4668,9 @@ class InsectColonyWarsGame {
         label: 'Discover Food Source',
         hint: 'Send scouts to explore',
         check: () => {
-          return Array.from(this.resources.values()).some(r => r.discovered);
+          // Check if any resources are discovered by the current colony
+          return this.currentColony && Array.from(this.discoveredResources.values())
+            .some(dr => dr.colony_id === this.currentColony!.id);
         }
       },
       {
@@ -4908,7 +4920,7 @@ class InsectColonyWarsGame {
         const ant = this.ants.get(antId);
         if (!ant) return;
         
-        if (e.shiftKey || e.ctrlKey) {
+        if ((e as MouseEvent).shiftKey || (e as MouseEvent).ctrlKey) {
           // Multi-select
           if (this.selectedAntsInPanel.has(antId)) {
             this.selectedAntsInPanel.delete(antId);
@@ -5159,7 +5171,7 @@ class InsectColonyWarsGame {
 
 // Clear localStorage on development server start (optional)
 // Add ?keepStorage to URL to preserve localStorage during development
-if (import.meta.env.DEV && !window.location.search.includes('keepStorage')) {
+if ((import.meta as any).env?.DEV && !window.location.search.includes('keepStorage')) {
   console.log('🧹 Clearing game state for fresh development start...');
   
   // Preserve user settings while clearing game state

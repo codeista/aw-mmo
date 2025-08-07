@@ -330,7 +330,7 @@ export function addAlert(message: string, type: 'info' | 'warning' | 'danger' | 
   alertList.insertBefore(alert, alertList.firstChild);
   
   // Keep only last 5 alerts
-  while (alertList.children.length > 5) {
+  while (alertList.children.length > 5 && alertList.lastChild) {
     alertList.removeChild(alertList.lastChild);
   }
   

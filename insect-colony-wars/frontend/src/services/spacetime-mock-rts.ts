@@ -626,7 +626,7 @@ export class MockSpacetimeService {
     const colony = {
       id: colonyId,
       player_id: this.identity,
-      queen_id: null,
+      queen_id: null as number | null,
       food: 0,
       water: 0,
       minerals: 0,
@@ -1779,7 +1779,7 @@ export class MockSpacetimeService {
     const colony = {
       id: colonyId,
       player_id: this.identity,
-      queen_id: null,
+      queen_id: null as number | null,
       food: baseFood,
       water: baseWater + bonusWater,
       minerals: 0,
